@@ -32,8 +32,6 @@ const OPTION_MAP = {
     { id: "gentle_threads", label: "🧵 젠틀모먼츠 스레드",    tid: 1 },
     { id: "wishiz_threads", label: "🧵 위시즈 스레드",        tid: 1 },
     { id: "yuyu_threads",   label: "🧵 유유모먼트 스레드",    tid: 1 },
-    { id: "sns_upload",     label: "📤 게시글 업로드",        tid: 1 },
-    { id: "sns_engage",     label: "💬 소통 및 마무리",       tid: 1 },
   ],
   2: [
     { id: "naver_order",    label: "🛒 젠틀모먼츠 네이버 스스 주문 확인", tid: 2 },
@@ -96,13 +94,16 @@ function generateDirectiveText(date, priority, memo) {
   const afternoon = rest.filter(i => ADMIN_TIDS.has(i.tid));
   const etcItems  = items.filter(i => ETC_TIDS.has(i.tid));
 
-  const morningLines = morning.map(i => `📌 ${orderLabel(i.rank)} · ${TEMPLATE_META[i.tid].label} — ${i.label}`).join("\n");
+  const morningLines = morning.map(i => {
+    const suffix = i.tid === 1 ? " — 업로드" : "";
+    return `📌 ${orderLabel(i.rank)} · ${TEMPLATE_META[i.tid].label} — ${i.label}${suffix}`;
+  }).join("\n");
   const afternoonLines = afternoon.length > 0
     ? afternoon.map(i => `✅ ${orderLabel(i.rank)} · ${TEMPLATE_META[i.tid].label} — ${i.label}`).join("\n")
     : "✅ 오후 루틴 업무 (예약 확인, 문의 응대)";
   const closingItems = items.filter(i => MARKETING_TIDS.has(i.tid));
   const closingLines = closingItems.length > 0
-    ? closingItems.map(i => `💬 ${i.label} 댓글·DM 소통 및 마무리`).join("\n")
+    ? closingItems.map(i => `💬 ${TEMPLATE_META[i.tid].label} — ${i.label} 소통 & 마무리`).join("\n")
     : "💬 오늘 업무 최종 점검 및 마무리";
   const etcSection = etcItems.length > 0
     ? `\n🔔 오늘의 특별 일정\n${etcItems.map(i => `• ${i.label}`).join("\n")}` : "";
@@ -135,6 +136,98 @@ ${closingLines}
 ${etcSection}${memoSection}
 
 수고하세요! 오늘도 화이팅입니다 💪`;
+}
+
+// ── 드래그 앤 드롭 순서 설정 패널 ───────────────────────
+function DragPriorityPanel({ priority, setPriority, movePriority }) {
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+
+  const handleTouchStart = (idx) => { setDragIdx(idx); };
+  const handleTouchMove = (e) => {
+    if (dragIdx === null) return;
+    const touch = e.touches[0];
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    const row = el?.closest("[data-drag-idx]");
+    if (row) {
+      const overIdx = parseInt(row.dataset.dragIdx);
+      if (overIdx !== dragOverIdx) setDragOverIdx(overIdx);
+    }
+  };
+  const handleTouchEnd = () => {
+    if (dragIdx !== null && dragOverIdx !== null && dragIdx !== dragOverIdx) {
+      const next = [...priority];
+      const [moved] = next.splice(dragIdx, 1);
+      next.splice(dragOverIdx, 0, moved);
+      setPriority(next);
+    }
+    setDragIdx(null); setDragOverIdx(null);
+  };
+  const handleDragStart = (idx) => setDragIdx(idx);
+  const handleDragOver = (e, idx) => { e.preventDefault(); setDragOverIdx(idx); };
+  const handleDrop = (idx) => {
+    if (dragIdx === null || dragIdx === idx) return;
+    const next = [...priority];
+    const [moved] = next.splice(dragIdx, 1);
+    next.splice(idx, 0, moved);
+    setPriority(next);
+    setDragIdx(null); setDragOverIdx(null);
+  };
+  const handleDragEnd = () => { setDragIdx(null); setDragOverIdx(null); };
+
+  return (
+    <div style={card}>
+      <label style={labelStyle}>
+        🔢 전체 업무 순서 설정
+        <span style={{ color: "#667eea", fontSize: 11, fontWeight: 400, marginLeft: 6 }}>(▲▼ 버튼 또는 꾹 눌러서 드래그)</span>
+      </label>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}
+        onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+        {priority.map((optId, idx) => {
+          const opt = OPTION_BY_ID[optId];
+          const meta = TEMPLATE_META[opt.tid];
+          const isDragging = dragIdx === idx;
+          const isOver = dragOverIdx === idx && dragIdx !== idx;
+          return (
+            <div key={optId} data-drag-idx={idx} draggable
+              onDragStart={() => handleDragStart(idx)}
+              onDragOver={(e) => handleDragOver(e, idx)}
+              onDrop={() => handleDrop(idx)}
+              onDragEnd={handleDragEnd}
+              onTouchStart={() => handleTouchStart(idx)}
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "10px 14px", borderRadius: 10,
+                background: isDragging ? "#f0f0ff" : isOver ? `${meta.color}10` : idx === 0 ? `${meta.color}15` : "#fafafa",
+                border: `2px solid ${isOver ? meta.color : isDragging ? "#667eea" : idx === 0 ? meta.color : "#e8eaf0"}`,
+                opacity: isDragging ? 0.5 : 1, transition: "all 0.15s",
+                cursor: "grab", userSelect: "none",
+              }}>
+              <span style={{ fontSize: 14, color: "#bbb", flexShrink: 0, padding: "0 2px", letterSpacing: -2 }}>⠿</span>
+              <span style={{
+                minWidth: 26, height: 26, borderRadius: "50%",
+                background: idx === 0 ? meta.color : "#ddd",
+                color: "white", fontWeight: 700, fontSize: 12,
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+              }}>{idx + 1}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "white", background: meta.color, borderRadius: 4, padding: "1px 7px", marginRight: 6 }}>{meta.label}</span>
+                <span style={{ fontSize: 13, fontWeight: idx === 0 ? 700 : 400, color: idx === 0 ? meta.color : "#444" }}>{opt.label}</span>
+                {idx === 0 && <span style={{ marginLeft: 6, fontSize: 10, color: meta.color, fontWeight: 700 }}>⭐ 첫번째</span>}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
+                <button onClick={(e) => { e.stopPropagation(); movePriority(idx, -1); }} disabled={idx === 0}
+                  style={{ padding: "3px 9px", borderRadius: 5, border: "1px solid #ddd", background: idx === 0 ? "#f5f5f5" : "white", cursor: idx === 0 ? "not-allowed" : "pointer", fontSize: 11, color: "#555" }}>▲</button>
+                <button onClick={(e) => { e.stopPropagation(); movePriority(idx, 1); }} disabled={idx === priority.length - 1}
+                  style={{ padding: "3px 9px", borderRadius: 5, border: "1px solid #ddd", background: idx === priority.length - 1 ? "#f5f5f5" : "white", cursor: idx === priority.length - 1 ? "not-allowed" : "pointer", fontSize: 11, color: "#555" }}>▼</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 11, color: "#aaa" }}>💡 항목을 꾹 눌러 위아래로 끌어서 순서를 바꿀 수 있어요</div>
+    </div>
+  );
 }
 
 function OptionBtn({ item, isOn, color, bg, onClick }) {
@@ -171,6 +264,7 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [liveDirective, setLiveDirective] = useState(null);
+  const [activeOptionTab, setActiveOptionTab] = useState(null);
 
   useEffect(() => {
     const histRef = ref(db, "history");
@@ -195,8 +289,11 @@ export default function App() {
         const removedIds = OPTION_MAP[tid].map(o => o.id);
         setSelectedOptions(p => { const n = new Set(p); removedIds.forEach(id => n.delete(id)); return n; });
         setPriority(p => p.filter(id => !removedIds.includes(id)));
-        return prev.filter(t => t !== tid);
+        const remaining = prev.filter(t => t !== tid);
+        setActiveOptionTab(remaining.length > 0 ? remaining[remaining.length - 1] : null);
+        return remaining;
       }
+      setActiveOptionTab(tid);
       return [...prev, tid];
     });
   };
@@ -273,8 +370,22 @@ export default function App() {
         {tab === "create" && (
           <div>
             <div style={card}>
-              <label style={labelStyle}>📅 날짜</label>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <label style={{ ...labelStyle, marginBottom: 0 }}>📅 날짜</label>
+                <button
+                  onClick={() => setDate(getTodayString())}
+                  style={{
+                    padding: "4px 10px", borderRadius: 7, border: "1px solid #667eea",
+                    background: date === getTodayString() ? "#667eea" : "white",
+                    color: date === getTodayString() ? "white" : "#667eea",
+                    fontSize: 11, fontWeight: 600, cursor: "pointer",
+                  }}
+                >오늘</button>
+              </div>
               <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
+              <div style={{ marginTop: 6, fontSize: 11, color: "#aaa" }}>
+                📌 {formatDate(date)}
+              </div>
             </div>
 
             <div style={card}>
@@ -304,57 +415,66 @@ export default function App() {
               </div>
             </div>
 
-            {activeTemplates.map(tid => {
-              const meta = TEMPLATE_META[tid];
-              const options = OPTION_MAP[tid];
-              const cnt = options.filter(o => selectedOptions.has(o.id)).length;
-              return (
-                <div key={tid} style={{ ...card, borderLeft: `4px solid ${meta.color}` }}>
-                  <label style={{ ...labelStyle, color: meta.color }}>{meta.label} — 세부 업무 선택</label>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-                    {options.map(opt => (
-                      <OptionBtn key={opt.id} item={opt} isOn={selectedOptions.has(opt.id)}
-                        color={meta.color} bg={meta.bg} onClick={() => toggleOption(opt.id)} />
-                    ))}
-                  </div>
-                  {cnt > 0 && <div style={{ marginTop: 10, padding: "7px 12px", borderRadius: 8, background: meta.bg, fontSize: 12, color: meta.color, fontWeight: 600 }}>✅ {cnt}개 선택됨</div>}
-                </div>
-              );
-            })}
-
-            {priority.length >= 2 && (
+            {activeTemplates.length > 0 && (
               <div style={card}>
-                <label style={labelStyle}>🔢 전체 업무 순서 설정 <span style={{ color: "#667eea", fontSize: 11, fontWeight: 400 }}>(▲▼으로 조정)</span></label>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-                  {priority.map((optId, idx) => {
-                    const opt = OPTION_BY_ID[optId];
-                    const meta = TEMPLATE_META[opt.tid];
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+                  {activeTemplates.map(tid => {
+                    const meta = TEMPLATE_META[tid];
+                    const cnt = OPTION_MAP[tid].filter(o => selectedOptions.has(o.id)).length;
+                    const isActive = activeOptionTab === tid;
                     return (
-                      <div key={optId} style={{
-                        display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10,
-                        background: idx === 0 ? `${meta.color}15` : "#fafafa",
-                        border: `2px solid ${idx === 0 ? meta.color : "#e8eaf0"}`,
+                      <button key={tid} onClick={() => setActiveOptionTab(tid)} style={{
+                        padding: "7px 12px", borderRadius: 20, border: "2px solid",
+                        borderColor: isActive ? meta.color : "#e8eaf0",
+                        background: isActive ? meta.color : "white",
+                        color: isActive ? "white" : meta.color,
+                        fontWeight: isActive ? 700 : 500,
+                        cursor: "pointer", fontSize: 12, transition: "all 0.18s",
+                        display: "flex", alignItems: "center", gap: 5,
                       }}>
-                        <span style={{
-                          minWidth: 26, height: 26, borderRadius: "50%",
-                          background: idx === 0 ? meta.color : "#ddd",
-                          color: "white", fontWeight: 700, fontSize: 12,
-                          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                        }}>{idx + 1}</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: "white", background: meta.color, borderRadius: 4, padding: "1px 7px", marginRight: 6 }}>{meta.label}</span>
-                          <span style={{ fontSize: 13, fontWeight: idx === 0 ? 700 : 400, color: idx === 0 ? meta.color : "#444" }}>{opt.label}</span>
-                          {idx === 0 && <span style={{ marginLeft: 6, fontSize: 10, color: meta.color, fontWeight: 700 }}>⭐ 첫번째</span>}
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
-                          <button onClick={() => movePriority(idx, -1)} disabled={idx === 0} style={{ padding: "2px 8px", borderRadius: 5, border: "1px solid #ddd", background: idx === 0 ? "#f5f5f5" : "white", cursor: idx === 0 ? "not-allowed" : "pointer", fontSize: 11, color: "#555" }}>▲</button>
-                          <button onClick={() => movePriority(idx, 1)} disabled={idx === priority.length - 1} style={{ padding: "2px 8px", borderRadius: 5, border: "1px solid #ddd", background: idx === priority.length - 1 ? "#f5f5f5" : "white", cursor: idx === priority.length - 1 ? "not-allowed" : "pointer", fontSize: 11, color: "#555" }}>▼</button>
-                        </div>
-                      </div>
+                        {meta.label}
+                        {cnt > 0 && (
+                          <span style={{ background: isActive ? "rgba(255,255,255,0.3)" : meta.color, color: "white", borderRadius: 10, fontSize: 10, padding: "1px 6px", fontWeight: 700 }}>{cnt}</span>
+                        )}
+                      </button>
                     );
                   })}
                 </div>
+                {activeOptionTab && OPTION_MAP[activeOptionTab] && (() => {
+                  const meta = TEMPLATE_META[activeOptionTab];
+                  const options = OPTION_MAP[activeOptionTab];
+                  const cnt = options.filter(o => selectedOptions.has(o.id)).length;
+                  return (
+                    <div style={{ borderTop: `3px solid ${meta.color}`, paddingTop: 14 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: meta.color, marginBottom: 10 }}>
+                        {meta.label} — 세부 업무 선택
+                        <span style={{ color: "#aaa", fontSize: 11, fontWeight: 400, marginLeft: 6 }}>(복수 선택 가능)</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {options.map(opt => (
+                          <OptionBtn key={opt.id} item={opt}
+                            isOn={selectedOptions.has(opt.id)}
+                            color={meta.color} bg={meta.bg}
+                            onClick={() => toggleOption(opt.id)} />
+                        ))}
+                      </div>
+                      {cnt > 0 && (
+                        <div style={{ marginTop: 10, padding: "7px 12px", borderRadius: 8, background: meta.bg, fontSize: 12, color: meta.color, fontWeight: 600 }}>
+                          ✅ {cnt}개 선택됨
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
+            )}
+
+            {priority.length >= 2 && (
+              <DragPriorityPanel
+                priority={priority}
+                setPriority={setPriority}
+                movePriority={movePriority}
+              />
             )}
 
             <div style={card}>
