@@ -1,4 +1,21 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, set, onValue, push } from "firebase/database";
+
+// ── Firebase 설정 ─────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyAm4Gy0T839mVZssBG1es4OafH2twa8usc",
+  authDomain: "gentlemoments.firebaseapp.com",
+  databaseURL: "https://gentlemoments-default-rtdb.firebaseio.com",
+  projectId: "gentlemoments",
+  storageBucket: "gentlemoments.firebasestorage.app",
+  messagingSenderId: "441871508789",
+  appId: "1:441871508789:web:4ab9c3bfff8f87da80d87c",
+  measurementId: "G-MYC4EJ03DL"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
 
 // ── 데이터 정의 ──────────────────────────────────────────
 const TEMPLATE_META = {
@@ -54,14 +71,11 @@ const OPTION_MAP = {
 
 const ALL_OPTIONS = Object.values(OPTION_MAP).flat();
 const OPTION_BY_ID = Object.fromEntries(ALL_OPTIONS.map(o => [o.id, o]));
-
-// 시간 블록별 업무 분류 (마케팅 계열 / 사무 계열 / 기타)
-const MARKETING_TIDS = new Set([1, 3]); // SNS, 릴스
-const ADMIN_TIDS     = new Set([2, 4]); // 쇼핑몰, 사무
+const MARKETING_TIDS = new Set([1, 3]);
+const ADMIN_TIDS     = new Set([2, 4]);
 const PHOTO_TIDS     = new Set([5]);
 const ETC_TIDS       = new Set([6]);
 
-// ── 날짜 유틸 ────────────────────────────────────────────
 function formatDate(dateStr) {
   if (!dateStr) return "";
   const d = new Date(dateStr + "T00:00:00");
@@ -72,45 +86,27 @@ function getTodayString() {
   return new Date().toISOString().split("T")[0];
 }
 
-// ── 지침서 자동 생성 엔진 ────────────────────────────────
 function generateDirectiveText(date, priority, memo) {
   if (priority.length === 0) return "";
-
   const items = priority.map((id, idx) => ({ ...OPTION_BY_ID[id], rank: idx + 1 }));
-
-  // 시간 블록별 분류
-  const morning  = items.filter(i => MARKETING_TIDS.has(i.tid) || PHOTO_TIDS.has(i.tid));
+  const morning   = items.filter(i => MARKETING_TIDS.has(i.tid) || PHOTO_TIDS.has(i.tid));
   const afternoon = items.filter(i => ADMIN_TIDS.has(i.tid));
-  const closing  = items.filter(i => MARKETING_TIDS.has(i.tid));
-  const etcItems = items.filter(i => ETC_TIDS.has(i.tid));
+  const closing   = items.filter(i => MARKETING_TIDS.has(i.tid));
+  const etcItems  = items.filter(i => ETC_TIDS.has(i.tid));
 
-  // 오전 블록 콘텐츠 (마케팅 + 사진)
   const morningLines = morning.length > 0
     ? morning.map(i => `📌 ${i.rank}순위 · ${TEMPLATE_META[i.tid].label} — ${i.label}`).join("\n")
-    : "📌 오전 업무 없음 (사무 업무 위주로 진행)";
-
-  // 오후 블록 콘텐츠 (사무·쇼핑몰)
+    : "📌 오전 루틴 업무 진행";
   const afternoonLines = afternoon.length > 0
     ? afternoon.map(i => `✅ ${i.rank}순위 · ${TEMPLATE_META[i.tid].label} — ${i.label}`).join("\n")
     : "✅ 오후 루틴 업무 (예약 확인, 문의 응대)";
-
-  // 마감 블록 (소통·마무리)
   const closingLines = closing.length > 0
     ? closing.map(i => `💬 ${i.label} 댓글·DM 소통 및 마무리`).join("\n")
     : "💬 오늘 업무 최종 점검 및 마무리";
-
-  // 기타 업무
   const etcSection = etcItems.length > 0
-    ? `\n🔔 오늘의 특별 일정\n${etcItems.map(i => `• ${i.label}`).join("\n")}`
-    : "";
-
-  // 핵심 목표 (1~2순위)
+    ? `\n🔔 오늘의 특별 일정\n${etcItems.map(i => `• ${i.label}`).join("\n")}` : "";
   const topGoals = items.slice(0, 2).map(i => `• ${i.label} 완료`).join("\n");
-
-  // 메모 섹션
-  const memoSection = memo.trim()
-    ? `\n📝 추가 메모\n• ${memo.trim()}`
-    : "";
+  const memoSection = memo.trim() ? `\n📝 추가 메모\n• ${memo.trim()}` : "";
 
   return `📅 ${formatDate(date)} 업무 지침서
 
@@ -140,7 +136,6 @@ ${etcSection}${memoSection}
 수고하세요! 오늘도 화이팅입니다 💪`;
 }
 
-// ── 공용 옵션 버튼 ───────────────────────────────────────
 function OptionBtn({ item, isOn, color, bg, onClick }) {
   return (
     <button onClick={onClick} style={{
@@ -164,7 +159,6 @@ function OptionBtn({ item, isOn, color, bg, onClick }) {
   );
 }
 
-// ── 메인 앱 ──────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("create");
   const [date, setDate] = useState(getTodayString());
@@ -176,19 +170,37 @@ export default function App() {
   const [checklist, setChecklist] = useState({});
   const [copied, setCopied] = useState(false);
   const [history, setHistory] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [liveDirective, setLiveDirective] = useState(null); // 실시간 공유 지침
 
+  // ── Firebase 실시간 구독 (히스토리 + 최신 지침) ──
   useEffect(() => {
-    const saved = sessionStorage.getItem("gm_history");
-    if (saved) setHistory(JSON.parse(saved));
+    // 히스토리 실시간 동기화
+    const histRef = ref(db, "history");
+    const unsub = onValue(histRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const arr = Object.entries(data)
+          .map(([key, val]) => ({ ...val, firebaseKey: key }))
+          .sort((a, b) => b.id - a.id)
+          .slice(0, 30);
+        setHistory(arr);
+      } else {
+        setHistory([]);
+      }
+    });
+
+    // 최신 공유 지침 실시간 구독
+    const liveRef = ref(db, "live");
+    const unsubLive = onValue(liveRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) setLiveDirective(data);
+    });
+
+    return () => { unsub(); unsubLive(); };
   }, []);
 
-  const saveHistory = (item) => {
-    const updated = [item, ...history].slice(0, 30);
-    setHistory(updated);
-    sessionStorage.setItem("gm_history", JSON.stringify(updated));
-  };
-
-  // 템플릿 토글
   const toggleTemplate = (tid) => {
     setActiveTemplates(prev => {
       if (prev.includes(tid)) {
@@ -201,7 +213,6 @@ export default function App() {
     });
   };
 
-  // 옵션 토글
   const toggleOption = (optId) => {
     setSelectedOptions(prev => {
       const next = new Set(prev);
@@ -216,7 +227,6 @@ export default function App() {
     });
   };
 
-  // 우선순위 이동
   const movePriority = (idx, dir) => {
     setPriority(prev => {
       const next = [...prev];
@@ -227,15 +237,37 @@ export default function App() {
     });
   };
 
-  // 지침서 생성
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     const text = generateDirectiveText(date, priority, memo);
     setResult(text);
     const lines = text.split("\n").filter(l => l.startsWith("📌") || l.startsWith("✅") || l.startsWith("💬"));
     const initCheck = {};
     lines.forEach((_, i) => { initCheck[i] = false; });
     setChecklist(initCheck);
-    saveHistory({ date, priority, memo, result: text, id: Date.now() });
+
+    // Firebase에 저장
+    setSaving(true);
+    try {
+      const item = { date, priority, memo, result: text, id: Date.now(), checks: initCheck };
+      // 히스토리에 추가
+      await push(ref(db, "history"), item);
+      // 최신 공유 지침 업데이트 (실시간 공유)
+      await set(ref(db, "live"), item);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2500);
+    } catch (e) {
+      console.error("저장 실패:", e);
+    }
+    setSaving(false);
+  };
+
+  // 체크리스트 Firebase 저장
+  const handleCheck = async (i) => {
+    const newCheck = { ...checklist, [i]: !checklist[i] };
+    setChecklist(newCheck);
+    if (liveDirective) {
+      await set(ref(db, "live/checks"), newCheck);
+    }
   };
 
   const handleCopy = () => {
@@ -245,7 +277,7 @@ export default function App() {
   };
 
   const checkItems = result.split("\n").filter(l => l.startsWith("📌") || l.startsWith("✅") || l.startsWith("💬"));
-  const isDisabled = priority.length === 0;
+  const isDisabled = saving || priority.length === 0;
 
   return (
     <div style={{ fontFamily: "'Noto Sans KR', sans-serif", minHeight: "100vh", background: "#f5f6fa" }}>
@@ -260,14 +292,15 @@ export default function App() {
       <div style={{ display: "flex", background: "white", borderBottom: "1px solid #e8eaf0" }}>
         {[
           { key: "create",  label: "📝 업무 지침 생성" },
+          { key: "live",    label: "📡 실시간 공유" },
           { key: "history", label: "🗂️ 히스토리" },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{
-            flex: 1, padding: "14px 8px", border: "none", background: "none",
+            flex: 1, padding: "14px 4px", border: "none", background: "none",
             fontWeight: tab === t.key ? 700 : 400,
             color: tab === t.key ? "#667eea" : "#888",
             borderBottom: tab === t.key ? "2px solid #667eea" : "2px solid transparent",
-            cursor: "pointer", fontSize: 13, transition: "all 0.2s",
+            cursor: "pointer", fontSize: 12, transition: "all 0.2s",
           }}>{t.label}</button>
         ))}
       </div>
@@ -277,14 +310,11 @@ export default function App() {
         {/* ── TAB: 업무 지침 생성 ── */}
         {tab === "create" && (
           <div>
-
-            {/* 날짜 */}
             <div style={card}>
               <label style={labelStyle}>📅 날짜</label>
               <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
             </div>
 
-            {/* 템플릿 복수 선택 */}
             <div style={card}>
               <label style={labelStyle}>
                 🗂️ 업무 템플릿 선택
@@ -316,14 +346,8 @@ export default function App() {
                   );
                 })}
               </div>
-              {activeTemplates.length > 0 && (
-                <div style={{ marginTop: 10, fontSize: 11, color: "#888" }}>
-                  ✅ {activeTemplates.length}개 템플릿 선택됨 — 아래에서 세부 업무를 선택하세요
-                </div>
-              )}
             </div>
 
-            {/* 각 템플릿 옵션 패널 */}
             {activeTemplates.map(tid => {
               const meta = TEMPLATE_META[tid];
               const options = OPTION_MAP[tid];
@@ -332,16 +356,13 @@ export default function App() {
                 <div key={tid} style={{ ...card, borderLeft: `4px solid ${meta.color}` }}>
                   <label style={{ ...labelStyle, color: meta.color }}>
                     {meta.label} — 세부 업무 선택
-                    <span style={{ color: "#aaa", fontSize: 11, marginLeft: 6, fontWeight: 400 }}>(복수 선택 가능)</span>
                   </label>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
                     {options.map(opt => (
-                      <OptionBtn
-                        key={opt.id} item={opt}
+                      <OptionBtn key={opt.id} item={opt}
                         isOn={selectedOptions.has(opt.id)}
                         color={meta.color} bg={meta.bg}
-                        onClick={() => toggleOption(opt.id)}
-                      />
+                        onClick={() => toggleOption(opt.id)} />
                     ))}
                   </div>
                   {selectedCount > 0 && (
@@ -353,7 +374,6 @@ export default function App() {
               );
             })}
 
-            {/* 우선순위 통합 패널 */}
             {priority.length >= 2 && (
               <div style={card}>
                 <label style={labelStyle}>
@@ -370,7 +390,6 @@ export default function App() {
                         padding: "10px 14px", borderRadius: 10,
                         background: idx === 0 ? `${meta.color}15` : "#fafafa",
                         border: `2px solid ${idx === 0 ? meta.color : "#e8eaf0"}`,
-                        transition: "all 0.2s",
                       }}>
                         <span style={{
                           minWidth: 26, height: 26, borderRadius: "50%",
@@ -381,8 +400,7 @@ export default function App() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <span style={{
                             fontSize: 10, fontWeight: 700, color: "white",
-                            background: meta.color, borderRadius: 4, padding: "1px 7px",
-                            marginRight: 6,
+                            background: meta.color, borderRadius: 4, padding: "1px 7px", marginRight: 6,
                           }}>{meta.label}</span>
                           <span style={{ fontSize: 13, fontWeight: idx === 0 ? 700 : 400, color: idx === 0 ? meta.color : "#444" }}>
                             {opt.label}
@@ -405,36 +423,36 @@ export default function App() {
                     );
                   })}
                 </div>
-                <div style={{ marginTop: 8, fontSize: 11, color: "#aaa" }}>
-                  💡 설정한 우선순위가 업무 지침서에 그대로 반영됩니다.
-                </div>
               </div>
             )}
 
-            {/* 추가 메모 */}
             <div style={card}>
               <label style={labelStyle}>📝 추가 메모 (선택)</label>
-              <textarea
-                value={memo}
-                onChange={e => setMemo(e.target.value)}
-                placeholder="예: 오늘 오후 3시에 고객 촬영 예약 있음, 택배 발송 마감일 등"
-                rows={3}
-                style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }}
-              />
+              <textarea value={memo} onChange={e => setMemo(e.target.value)}
+                placeholder="예: 오늘 오후 3시에 고객 촬영 예약 있음"
+                rows={3} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }} />
             </div>
 
-            {/* 생성 버튼 */}
             <button onClick={handleGenerate} disabled={isDisabled} style={{
               width: "100%", padding: "15px", borderRadius: 12, border: "none",
               background: isDisabled ? "#c5c6d0" : "linear-gradient(135deg, #667eea, #764ba2)",
               color: "white", fontWeight: 700, fontSize: 16,
               cursor: isDisabled ? "not-allowed" : "pointer",
-              marginBottom: 20, transition: "all 0.2s",
+              marginBottom: 12, transition: "all 0.2s",
             }}>
-              {isDisabled ? "⬆️ 업무를 먼저 선택해 주세요" : "✨ 일일 업무 지침서 생성"}
+              {saving ? "⏳ 저장 중..." : isDisabled ? "⬆️ 업무를 먼저 선택해 주세요" : "✨ 업무 지침서 생성 및 저장"}
             </button>
 
-            {/* 결과 */}
+            {saveSuccess && (
+              <div style={{
+                background: "#f0fff4", border: "1px solid #86efac", borderRadius: 10,
+                padding: "12px 16px", marginBottom: 12, fontSize: 13, color: "#15803d", fontWeight: 600,
+                textAlign: "center",
+              }}>
+                ✅ 저장 완료! 직원 화면에 실시간 반영됐어요 📡
+              </div>
+            )}
+
             {result && (
               <div style={card}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -443,20 +461,18 @@ export default function App() {
                     padding: "6px 14px", borderRadius: 8, border: "1px solid #667eea",
                     background: copied ? "#667eea" : "white",
                     color: copied ? "white" : "#667eea",
-                    fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all 0.2s",
+                    fontSize: 12, fontWeight: 600, cursor: "pointer",
                   }}>{copied ? "✅ 복사됨!" : "📋 복사하기"}</button>
                 </div>
                 <pre style={{
                   whiteSpace: "pre-wrap", wordBreak: "break-word",
                   background: "#f9f9fc", borderRadius: 10, padding: "16px",
-                  fontSize: 13, lineHeight: 1.8, color: "#333",
-                  border: "1px solid #eee", margin: 0,
+                  fontSize: 13, lineHeight: 1.8, color: "#333", border: "1px solid #eee", margin: 0,
                 }}>{result}</pre>
 
-                {/* 체크리스트 */}
                 {checkItems.length > 0 && (
                   <div style={{ marginTop: 16 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: "#555", marginBottom: 8 }}>✅ 직원 완료 체크리스트</div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "#555", marginBottom: 8 }}>✅ 완료 체크리스트</div>
                     {checkItems.map((item, i) => (
                       <label key={i} style={{
                         display: "flex", alignItems: "center", gap: 8,
@@ -464,15 +480,13 @@ export default function App() {
                         background: checklist[i] ? "#f0fff4" : "#fafafa",
                         marginBottom: 6, cursor: "pointer",
                         border: "1px solid", borderColor: checklist[i] ? "#86efac" : "#eee",
-                        transition: "all 0.2s",
                       }}>
                         <input type="checkbox" checked={!!checklist[i]}
-                          onChange={() => setChecklist(p => ({ ...p, [i]: !p[i] }))}
+                          onChange={() => handleCheck(i)}
                           style={{ accentColor: "#667eea", width: 16, height: 16 }} />
-                        <span style={{
-                          fontSize: 12, color: checklist[i] ? "#15803d" : "#444",
-                          textDecoration: checklist[i] ? "line-through" : "none",
-                        }}>{item}</span>
+                        <span style={{ fontSize: 12, color: checklist[i] ? "#15803d" : "#444", textDecoration: checklist[i] ? "line-through" : "none" }}>
+                          {item}
+                        </span>
                       </label>
                     ))}
                     <div style={{ marginTop: 8, fontSize: 12, color: "#667eea", fontWeight: 600 }}>
@@ -485,24 +499,92 @@ export default function App() {
           </div>
         )}
 
+        {/* ── TAB: 실시간 공유 ── */}
+        {tab === "live" && (
+          <div>
+            <div style={{ ...card, background: "linear-gradient(135deg, #667eea15, #764ba215)", border: "1px solid #667eea30" }}>
+              <div style={{ fontSize: 13, color: "#667eea", fontWeight: 700, marginBottom: 4 }}>
+                📡 실시간 공유 지침서
+              </div>
+              <div style={{ fontSize: 11, color: "#888" }}>
+                대표님이 지침서를 생성하면 이 화면에 즉시 반영돼요
+              </div>
+            </div>
+
+            {liveDirective ? (
+              <div style={card}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#333" }}>
+                    📅 {formatDate(liveDirective.date)}
+                  </span>
+                  <span style={{ fontSize: 11, color: "#43b89c", fontWeight: 600 }}>● 최신</span>
+                </div>
+                <pre style={{
+                  whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  background: "#f9f9fc", borderRadius: 10, padding: "16px",
+                  fontSize: 13, lineHeight: 1.8, color: "#333", border: "1px solid #eee", margin: 0,
+                }}>{liveDirective.result}</pre>
+
+                {/* 직원 체크리스트 */}
+                {liveDirective.result && (() => {
+                  const liveItems = liveDirective.result.split("\n").filter(l => l.startsWith("📌") || l.startsWith("✅") || l.startsWith("💬"));
+                  const liveChecks = liveDirective.checks || {};
+                  return liveItems.length > 0 ? (
+                    <div style={{ marginTop: 16 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#555", marginBottom: 8 }}>✅ 오늘의 체크리스트</div>
+                      {liveItems.map((item, i) => (
+                        <label key={i} style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          padding: "8px 10px", borderRadius: 8,
+                          background: liveChecks[i] ? "#f0fff4" : "#fafafa",
+                          marginBottom: 6, cursor: "pointer",
+                          border: "1px solid", borderColor: liveChecks[i] ? "#86efac" : "#eee",
+                        }}>
+                          <input type="checkbox" checked={!!liveChecks[i]}
+                            onChange={async () => {
+                              const newChecks = { ...liveChecks, [i]: !liveChecks[i] };
+                              await set(ref(db, "live/checks"), newChecks);
+                            }}
+                            style={{ accentColor: "#667eea", width: 16, height: 16 }} />
+                          <span style={{ fontSize: 12, color: liveChecks[i] ? "#15803d" : "#444", textDecoration: liveChecks[i] ? "line-through" : "none" }}>
+                            {item}
+                          </span>
+                        </label>
+                      ))}
+                      <div style={{ marginTop: 8, fontSize: 12, color: "#667eea", fontWeight: 600 }}>
+                        완료: {Object.values(liveChecks).filter(Boolean).length} / {liveItems.length}
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+            ) : (
+              <div style={{ ...card, textAlign: "center", color: "#aaa", padding: 48, fontSize: 14 }}>
+                📭 아직 공유된 업무 지침이 없어요.<br />
+                <span style={{ fontSize: 12, marginTop: 6, display: "block" }}>
+                  대표님이 지침서를 생성하면 여기에 나타나요!
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── TAB: 히스토리 ── */}
         {tab === "history" && (
           <div>
             <div style={{ fontWeight: 700, fontSize: 15, color: "#333", marginBottom: 14 }}>🗂️ 과거 업무 지침 히스토리</div>
             {history.length === 0 ? (
               <div style={{ ...card, textAlign: "center", color: "#aaa", padding: 40, fontSize: 14 }}>
-                아직 생성된 지침이 없어요.<br />업무 지침 생성 탭에서 먼저 만들어보세요!
+                아직 생성된 지침이 없어요.
               </div>
-            ) : history.map(h => <HistoryCard key={h.id} item={h} />)}
+            ) : history.map(h => <HistoryCard key={h.firebaseKey || h.id} item={h} />)}
           </div>
         )}
-
       </div>
     </div>
   );
 }
 
-// ── 히스토리 카드 ─────────────────────────────────────────
 function HistoryCard({ item }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -518,7 +600,7 @@ function HistoryCard({ item }) {
         <div>
           <div style={{ fontWeight: 700, fontSize: 13, color: "#333" }}>📅 {formatDate(item.date)}</div>
           <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>
-            {item.priority?.map(id => OPTION_BY_ID[id]?.label).filter(Boolean).join(", ").slice(0, 45)}...
+            {(item.priority || []).map(id => OPTION_BY_ID[id]?.label).filter(Boolean).join(", ").slice(0, 50)}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
