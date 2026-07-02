@@ -541,13 +541,6 @@ function HistoryCard({ item }) {
   );
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr + "T00:00:00");
-  const days = ["일", "월", "화", "수", "목", "금", "토"];
-  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${days[d.getDay()]})`;
-}
-
 const card = {
   background: "white", borderRadius: 14, padding: "18px 16px",
   marginBottom: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
