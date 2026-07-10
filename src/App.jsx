@@ -66,10 +66,6 @@ const OPTION_MAP = {
 };
 const ALL_OPTIONS = Object.values(OPTION_MAP).flat();
 const OPTION_BY_ID = Object.fromEntries(ALL_OPTIONS.map(o => [o.id, o]));
-const MARKETING_TIDS = new Set([1, 3]);
-const ADMIN_TIDS     = new Set([2, 4]);
-const PHOTO_TIDS     = new Set([5]);
-const ETC_TIDS       = new Set([6]);
 
 // ── 날짜 유틸 ────────────────────────────────────────────
 function getTodayString() {
@@ -87,67 +83,36 @@ function formatDate(dateStr) {
 }
 function orderLabel(n) { return `${n}번째`; }
 
-// ── 지침서 생성 ──────────────────────────────────────────
+// ── 지침서 생성 (심플 버전) ──────────────────────────────
 function generateDirectiveText(date, priority, memo, optionMemos) {
   if (priority.length === 0) return "";
   const items = priority.map((id, idx) => ({ ...OPTION_BY_ID[id], rank: idx + 1 }));
-  const top1 = items[0];
-  const rest = items.slice(1);
-  const morning   = [top1, ...rest.filter(i => (MARKETING_TIDS.has(i.tid) || PHOTO_TIDS.has(i.tid)) && i.id !== top1.id)];
-  const afternoon = rest.filter(i => ADMIN_TIDS.has(i.tid));
-  const etcItems  = items.filter(i => ETC_TIDS.has(i.tid));
 
-  const morningLines = morning.map(i => {
-    const suffix = i.tid === 1 ? " — 업로드" : "";
-    const memoNote = optionMemos?.[i.id] ? ` (${optionMemos[i.id]})` : "";
-    return `📌 ${orderLabel(i.rank)} · ${TEMPLATE_META[i.tid].label} — ${i.label}${suffix}${memoNote}`;
+  // 템플릿별로 그룹핑
+  const grouped = {};
+  items.forEach(i => {
+    if (!grouped[i.tid]) grouped[i.tid] = [];
+    grouped[i.tid].push(i);
+  });
+
+  // 각 항목 라인 생성
+  const taskLines = items.map(i => {
+    const memoNote = optionMemos?.[i.id] ? `\n   └ 📝 ${optionMemos[i.id]}` : "";
+    const uploadTag = i.tid === 1 ? " 업로드" : "";
+    return `${i.rank}번째 · ${i.label}${uploadTag}${memoNote}`;
   }).join("\n");
 
-  const afternoonLines = afternoon.length > 0
-    ? afternoon.map(i => {
-        const memoNote = optionMemos?.[i.id] ? ` (${optionMemos[i.id]})` : "";
-        return `✅ ${orderLabel(i.rank)} · ${TEMPLATE_META[i.tid].label} — ${i.label}${memoNote}`;
-      }).join("\n")
-    : "✅ 오후 루틴 업무 (예약 확인, 문의 응대)";
-
-  const closingItems = items.filter(i => MARKETING_TIDS.has(i.tid));
-  const closingLines = closingItems.length > 0
-    ? closingItems.map(i => `💬 ${TEMPLATE_META[i.tid].label} — ${i.label} 소통 & 마무리`).join("\n")
-    : "💬 오늘 업무 최종 점검 및 마무리";
-
-  const etcSection = etcItems.length > 0
-    ? `\n🔔 오늘의 특별 일정\n${etcItems.map(i => {
-        const memoNote = optionMemos?.[i.id] ? ` (${optionMemos[i.id]})` : "";
-        return `• ${i.label}${memoNote}`;
-      }).join("\n")}` : "";
-
-  const topGoals = items.slice(0, 2).map(i => `• ${i.label} 완료`).join("\n");
-  const memoSection = memo.trim() ? `\n📝 추가 메모\n• ${memo.trim()}` : "";
+  const memoSection = memo.trim() ? `\n📝 메모\n${memo.trim()}` : "";
 
   return `📅 ${formatDate(date)} 업무 지침서
 
 안녕하세요! 오늘도 잘 부탁드려요 😊
 
-🎯 오늘의 핵심 목표
-${topGoals}
-
 ━━━━━━━━━━━━━━━━━━
-🌅 10:00 ~ 12:00 | 집중 업무 블록
+📋 오늘의 업무 목록
 ━━━━━━━━━━━━━━━━━━
-${morningLines}
-
-🍱 12:00 ~ 13:00 | 점심시간
-
-━━━━━━━━━━━━━━━━━━
-📁 13:00 ~ 15:00 | 사무 & 루틴 블록
-━━━━━━━━━━━━━━━━━━
-${afternoonLines}
-
-━━━━━━━━━━━━━━━━━━
-📲 15:00 ~ 16:00 | 소통 & 마감 블록
-━━━━━━━━━━━━━━━━━━
-${closingLines}
-${etcSection}${memoSection}
+${taskLines}
+${memoSection}
 
 수고하세요! 오늘도 화이팅입니다 💪`;
 }
@@ -316,14 +281,20 @@ export default function App() {
   const handleGenerate = async () => {
     const text = generateDirectiveText(date, priority, memo, optionMemos);
     setResult(text);
-    const lines = text.split("\n").filter(l => l.startsWith("📌")||l.startsWith("✅")||l.startsWith("💬"));
+    // 새 형식: "N번째 · 업무명" 줄을 체크리스트로 파싱
+    const lines = text.split("\n").filter(l => /^\d+번째/.test(l));
     const initCheck = {}; lines.forEach((_,i) => { initCheck[i] = false; });
     setChecklist(initCheck);
     setSaving(true);
     try {
-      const item = { date, priority, memo, optionMemos, result: text, id: Date.now(), checks: initCheck, tomorrowNote: "", orderChanged: false, workerChecks: {} };
-      await push(ref(db, "history"), item);
-      await set(ref(db, "live"), item);
+      const item = {
+        date, priority, memo, optionMemos, result: text,
+        id: Date.now(), checks: initCheck, tomorrowNote: "",
+        orderChanged: false, workerOrder: null,
+      };
+      const pushed = await push(ref(db, "history"), item);
+      // live에 firebaseKey 포함해서 저장 (히스토리 연동용)
+      await set(ref(db, "live"), { ...item, firebaseKey: pushed.key });
       setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 2500);
     } catch(e) { console.error(e); }
     setSaving(false);
@@ -710,11 +681,10 @@ function WorkerTab({ liveDirective, db }) {
 
   useEffect(() => {
     if (liveDirective?.result) {
-      const raw = liveDirective.result.split("\n").filter(l=>l.startsWith("📌")||l.startsWith("✅")||l.startsWith("💬"));
-      const getRank = (line) => { const m = line.match(/(\d+)번째/); return m ? parseInt(m[1]) : 999; };
-      // workerOrder 있으면 그걸 쓰고, 없으면 순위 정렬
+      // 새 형식: "N번째 · 업무명" 줄만 추출 (메모 줄 제외)
+      const raw = liveDirective.result.split("\n").filter(l => /^\d+번째/.test(l));
       if (liveDirective.workerOrder) { setLocalOrder(liveDirective.workerOrder); }
-      else { setLocalOrder(prev => prev || [...raw].sort((a,b)=>getRank(a)-getRank(b))); }
+      else { setLocalOrder(prev => prev || raw); }
     }
   }, [liveDirective]);
 
@@ -741,10 +711,8 @@ function WorkerTab({ liveDirective, db }) {
   };
 
   const resetOrder = async () => {
-    const raw = liveDirective.result.split("\n").filter(l=>l.startsWith("📌")||l.startsWith("✅")||l.startsWith("💬"));
-    const getRank = (line) => { const m = line.match(/(\d+)번째/); return m?parseInt(m[1]):999; };
-    const sorted = [...raw].sort((a,b)=>getRank(a)-getRank(b));
-    setLocalOrder(sorted); setOrderChanged(false);
+    const raw = liveDirective.result.split("\n").filter(l => /^\d+번째/.test(l));
+    setLocalOrder(raw); setOrderChanged(false);
     await set(ref(db,"live/orderChanged"), false);
     await set(ref(db,"live/workerOrder"), null);
   };
