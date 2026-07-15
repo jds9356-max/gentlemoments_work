@@ -210,10 +210,16 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [liveDirective, setLiveDirective] = useState(null);
-  // 대표 업무 탭
-  const [bossTab, setBossTab] = useState("today"); // today | note
-  const [bossTasks, setBossTasks] = useState([]);
-  const [bossInput, setBossInput] = useState("");
+  // 대표 업무 탭 (업무 지침과 동일 구조)
+  const [bossDate, setBossDate] = useState(getTodayString());
+  const [bossActiveTemplates, setBossActiveTemplates] = useState([]);
+  const [bossActiveOptionTab, setBossActiveOptionTab] = useState(null);
+  const [bossSelectedOptions, setBossSelectedOptions] = useState(new Set());
+  const [bossOptionMemos, setBossOptionMemos] = useState({});
+  const [bossPriority, setBossPriority] = useState([]);
+  const [bossMemo, setBossMemo] = useState("");
+  const [bossResult, setBossResult] = useState("");
+  const [bossCopied, setBossCopied] = useState(false);
   const [bossNote, setBossNote] = useState("");
 
   // 실시간 날짜 — 분 단위로 갱신
@@ -234,9 +240,8 @@ export default function App() {
       } else setHistory([]);
     });
     const u2 = onValue(ref(db, "live"), (snap) => { if (snap.val()) setLiveDirective(snap.val()); });
-    const u3 = onValue(ref(db, "bossTasks"), (snap) => { const d = snap.val(); setBossTasks(d ? Object.entries(d).map(([k,v])=>({...v,key:k})).sort((a,b)=>a.id-b.id) : []); });
     const u4 = onValue(ref(db, "bossNote"), (snap) => { if (snap.val() !== null) setBossNote(snap.val()); });
-    return () => { u1(); u2(); u3(); u4(); };
+    return () => { u1(); u2(); u4(); };
   }, []);
 
   const toggleTemplate = (tid) => {
@@ -310,19 +315,6 @@ export default function App() {
     if (liveDirective.firebaseKey) {
       await set(ref(db, `history/${liveDirective.firebaseKey}/checks`), checks);
     }
-  };
-
-  // 대표 업무 추가
-  const addBossTask = async () => {
-    if (!bossInput.trim()) return;
-    await push(ref(db, "bossTasks"), { text: bossInput.trim(), done: false, id: Date.now() });
-    setBossInput("");
-  };
-  const toggleBossTask = async (task) => {
-    await set(ref(db, `bossTasks/${task.key}/done`), !task.done);
-  };
-  const deleteBossTask = async (task) => {
-    await remove(ref(db, `bossTasks/${task.key}`));
   };
 
   const handleCopy = () => { navigator.clipboard.writeText(result); setCopied(true); setTimeout(()=>setCopied(false),2000); };
@@ -549,90 +541,193 @@ export default function App() {
         {/* ── 대표 업무 탭 ── */}
         {tab === "boss" && (
           <div>
-            <div style={{ ...card, background:"linear-gradient(135deg, #764ba215, #667eea15)", border:"1px solid #667eea30" }}>
+            <div style={{ ...card, background:"linear-gradient(135deg, #764ba215, #667eea15)", border:"1px solid #764ba230" }}>
               <div style={{ fontSize:13, color:"#764ba2", fontWeight:700, marginBottom:4 }}>👔 대표 업무</div>
-              <div style={{ fontSize:11, color:"#888" }}>대표님의 오늘 할 일과 메모를 관리해요</div>
+              <div style={{ fontSize:11, color:"#888" }}>대표님의 업무를 직접 구성하고 관리해요</div>
             </div>
 
-            {/* 서브탭 */}
-            <div style={{ display:"flex", gap:8, marginBottom:14 }}>
-              {[{ key:"today", label:"📋 오늘 할 일" }, { key:"note", label:"📝 업무 노트" }].map(t => (
-                <button key={t.key} onClick={() => setBossTab(t.key)} style={{
-                  flex:1, padding:"10px", borderRadius:10, border:"2px solid",
-                  borderColor: bossTab===t.key ? "#764ba2" : "#e8eaf0",
-                  background: bossTab===t.key ? "#764ba215" : "white",
-                  color: bossTab===t.key ? "#764ba2" : "#888",
-                  fontWeight: bossTab===t.key ? 700 : 400,
-                  cursor:"pointer", fontSize:13,
-                }}>{t.label}</button>
-              ))}
-            </div>
-
-            {bossTab === "today" && (
-              <div>
-                {/* 입력 */}
-                <div style={card}>
-                  <label style={labelStyle}>➕ 할 일 추가</label>
-                  <div style={{ display:"flex", gap:8 }}>
-                    <input type="text" value={bossInput} onChange={e => setBossInput(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && addBossTask()}
-                      placeholder="오늘 처리할 업무 입력 후 Enter"
-                      style={{ ...inputStyle, flex:1 }} />
-                    <button onClick={addBossTask} style={{
-                      padding:"10px 16px", borderRadius:10, border:"none",
-                      background:"linear-gradient(135deg, #667eea, #764ba2)",
-                      color:"white", fontWeight:700, fontSize:13, cursor:"pointer", whiteSpace:"nowrap",
-                    }}>추가</button>
-                  </div>
-                </div>
-
-                {/* 할 일 목록 */}
-                <div style={card}>
-                  <label style={labelStyle}>
-                    📋 오늘의 대표 업무
-                    <span style={{ marginLeft:8, fontSize:11, color:"#888", fontWeight:400 }}>
-                      완료 {bossTasks.filter(t=>t.done).length} / {bossTasks.length}
-                    </span>
-                  </label>
-                  {bossTasks.length === 0 ? (
-                    <div style={{ textAlign:"center", color:"#bbb", padding:"24px 0", fontSize:13 }}>아직 할 일이 없어요. 위에서 추가해보세요!</div>
-                  ) : (
-                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                      {bossTasks.map(task => (
-                        <div key={task.key} style={{
-                          display:"flex", alignItems:"center", gap:10,
-                          padding:"10px 12px", borderRadius:10,
-                          background: task.done ? "#f0fff4" : "#fafafa",
-                          border:`1px solid ${task.done ? "#86efac" : "#e8eaf0"}`,
-                        }}>
-                          <input type="checkbox" checked={!!task.done} onChange={() => toggleBossTask(task)}
-                            style={{ accentColor:"#764ba2", width:18, height:18, flexShrink:0, cursor:"pointer" }} />
-                          <span style={{ flex:1, fontSize:13, color: task.done?"#15803d":"#333", textDecoration: task.done?"line-through":"none" }}>{task.text}</span>
-                          <button onClick={() => deleteBossTask(task)} style={{ padding:"3px 8px", borderRadius:6, border:"1px solid #f5576c", background:"white", color:"#f5576c", fontSize:11, cursor:"pointer" }}>🗑️</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {bossTasks.length > 0 && (
-                    <div style={{ marginTop:12, height:6, borderRadius:3, background:"#e8eaf0" }}>
-                      <div style={{ height:"100%", borderRadius:3, background:"linear-gradient(90deg,#667eea,#764ba2)", width:`${bossTasks.length > 0 ? bossTasks.filter(t=>t.done).length/bossTasks.length*100 : 0}%`, transition:"width 0.4s" }} />
-                    </div>
-                  )}
-                </div>
+            {/* 날짜 */}
+            <div style={card}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <label style={{ ...labelStyle, marginBottom:0 }}>📅 날짜</label>
+                <button onClick={() => setBossDate(getTodayString())} style={{
+                  padding:"4px 10px", borderRadius:7, border:"1px solid #764ba2",
+                  background: bossDate===getTodayString() ? "#764ba2" : "white",
+                  color: bossDate===getTodayString() ? "white" : "#764ba2",
+                  fontSize:11, fontWeight:600, cursor:"pointer",
+                }}>오늘</button>
               </div>
-            )}
+              <input type="date" value={bossDate} onChange={e => setBossDate(e.target.value)} style={inputStyle} />
+              <div style={{ marginTop:6, fontSize:11, color:"#aaa" }}>📌 {formatDate(bossDate)}</div>
+            </div>
 
-            {bossTab === "note" && (
+            {/* 템플릿 선택 */}
+            <div style={card}>
+              <label style={labelStyle}>🗂️ 업무 템플릿 선택 <span style={{ color:"#764ba2", fontSize:11, fontWeight:400 }}>(복수 선택 가능)</span></label>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:8 }}>
+                {Object.entries(TEMPLATE_META).map(([tidStr, meta]) => {
+                  const tid = Number(tidStr);
+                  const isOn = bossActiveTemplates.includes(tid);
+                  return (
+                    <button key={tid} onClick={() => {
+                      setBossActiveTemplates(prev => {
+                        if (prev.includes(tid)) {
+                          const removedIds = OPTION_MAP[tid].map(o => o.id);
+                          setBossSelectedOptions(p => { const n = new Set(p); removedIds.forEach(id => n.delete(id)); return n; });
+                          setBossPriority(p => p.filter(id => !removedIds.includes(id)));
+                          setBossOptionMemos(p => { const n = {...p}; removedIds.forEach(id => delete n[id]); return n; });
+                          const remaining = prev.filter(t => t !== tid);
+                          setBossActiveOptionTab(remaining.length > 0 ? remaining[remaining.length-1] : null);
+                          return remaining;
+                        }
+                        setBossActiveOptionTab(tid);
+                        return [...prev, tid];
+                      });
+                    }} style={{
+                      padding:"11px 12px", borderRadius:10, border:"2px solid",
+                      borderColor: isOn?meta.color:"#e8eaf0", background: isOn?meta.bg:"white",
+                      color: isOn?meta.color:"#555", fontWeight: isOn?700:400,
+                      cursor:"pointer", fontSize:12, textAlign:"left",
+                      transition:"all 0.2s", display:"flex", alignItems:"center", gap:6,
+                    }}>
+                      <span style={{ width:16, height:16, borderRadius:4, border:"2px solid", borderColor:isOn?meta.color:"#ccc", background:isOn?meta.color:"white", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:10, color:"white", fontWeight:700, flexShrink:0 }}>{isOn?"✓":""}</span>
+                      {meta.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 탭형 옵션 패널 + 항목별 메모 */}
+            {bossActiveTemplates.length > 0 && (
               <div style={card}>
-                <label style={{ ...labelStyle, color:"#764ba2" }}>📝 업무 노트</label>
-                <textarea value={bossNote}
-                  onChange={async (e) => { setBossNote(e.target.value); await set(ref(db, "bossNote"), e.target.value); }}
-                  placeholder={"공유 사항, 지시 내용, 체크할 것들을 자유롭게 적어주세요.\n예:\n• 이번 주 목요일 단체 촬영 예약 확인\n• 쿠팡 정산 날짜 체크\n• 릴스 15초 이하로 제작 요청"}
-                  rows={14}
-                  style={{ ...inputStyle, resize:"vertical", lineHeight:1.8 }} />
-                <div style={{ marginTop:6, fontSize:11, color:"#43b89c", fontWeight:600 }}>✅ 자동 저장됩니다</div>
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+                  {bossActiveTemplates.map(tid => {
+                    const meta = TEMPLATE_META[tid];
+                    const cnt = OPTION_MAP[tid].filter(o => bossSelectedOptions.has(o.id)).length;
+                    const isActive = bossActiveOptionTab === tid;
+                    return (
+                      <button key={tid} onClick={() => setBossActiveOptionTab(tid)} style={{
+                        padding:"7px 12px", borderRadius:20, border:"2px solid",
+                        borderColor: isActive?meta.color:"#e8eaf0",
+                        background: isActive?meta.color:"white",
+                        color: isActive?"white":meta.color,
+                        fontWeight: isActive?700:500,
+                        cursor:"pointer", fontSize:12, transition:"all 0.18s",
+                        display:"flex", alignItems:"center", gap:5,
+                      }}>
+                        {meta.label}
+                        {cnt > 0 && <span style={{ background:isActive?"rgba(255,255,255,0.3)":meta.color, color:"white", borderRadius:10, fontSize:10, padding:"1px 6px", fontWeight:700 }}>{cnt}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {bossActiveOptionTab && OPTION_MAP[bossActiveOptionTab] && (() => {
+                  const meta = TEMPLATE_META[bossActiveOptionTab];
+                  const options = OPTION_MAP[bossActiveOptionTab];
+                  const cnt = options.filter(o => bossSelectedOptions.has(o.id)).length;
+                  return (
+                    <div style={{ borderTop:`3px solid ${meta.color}`, paddingTop:14 }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:meta.color, marginBottom:10 }}>
+                        {meta.label} — 세부 업무 선택
+                        <span style={{ color:"#aaa", fontSize:11, fontWeight:400, marginLeft:6 }}>(복수 선택 가능)</span>
+                      </div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                        {options.map(opt => (
+                          <div key={opt.id}>
+                            <OptionBtn item={opt} isOn={bossSelectedOptions.has(opt.id)}
+                              color={meta.color} bg={meta.bg}
+                              onClick={() => {
+                                setBossSelectedOptions(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(opt.id)) {
+                                    next.delete(opt.id);
+                                    setBossPriority(p => p.filter(id => id !== opt.id));
+                                    setBossOptionMemos(p => { const n={...p}; delete n[opt.id]; return n; });
+                                  } else {
+                                    next.add(opt.id);
+                                    setBossPriority(p => [...p, opt.id]);
+                                  }
+                                  return next;
+                                });
+                              }} />
+                            {bossSelectedOptions.has(opt.id) && (
+                              <input type="text"
+                                value={bossOptionMemos[opt.id] || ""}
+                                onChange={e => setBossOptionMemos(p => ({ ...p, [opt.id]: e.target.value }))}
+                                placeholder={`📝 ${opt.label} 메모 (선택)`}
+                                style={{ ...inputStyle, marginTop:4, fontSize:12, padding:"7px 12px", background:"#fafafa" }}
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      {cnt > 0 && <div style={{ marginTop:10, padding:"7px 12px", borderRadius:8, background:meta.bg, fontSize:12, color:meta.color, fontWeight:600 }}>✅ {cnt}개 선택됨</div>}
+                    </div>
+                  );
+                })()}
               </div>
             )}
+
+            {/* 순서 설정 */}
+            {bossPriority.length >= 2 && (
+              <DragPriorityPanel
+                priority={bossPriority}
+                setPriority={setBossPriority}
+                movePriority={(idx, dir) => {
+                  setBossPriority(prev => {
+                    const next = [...prev]; const swap = idx+dir;
+                    if (swap<0||swap>=next.length) return prev;
+                    [next[idx],next[swap]]=[next[swap],next[idx]]; return next;
+                  });
+                }}
+              />
+            )}
+
+            {/* 추가 메모 */}
+            <div style={card}>
+              <label style={labelStyle}>📝 추가 메모 (선택)</label>
+              <textarea value={bossMemo} onChange={e => setBossMemo(e.target.value)}
+                placeholder="예: 오늘 오후 촬영 미팅, 정산 확인 필요" rows={3}
+                style={{ ...inputStyle, resize:"vertical", lineHeight:1.6 }} />
+            </div>
+
+            {/* 생성 버튼 */}
+            <button
+              onClick={() => setBossResult(generateDirectiveText(bossDate, bossPriority, bossMemo, bossOptionMemos))}
+              disabled={bossPriority.length === 0}
+              style={{
+                width:"100%", padding:"15px", borderRadius:12, border:"none",
+                background: bossPriority.length===0 ? "#c5c6d0" : "linear-gradient(135deg, #764ba2, #667eea)",
+                color:"white", fontWeight:700, fontSize:16,
+                cursor: bossPriority.length===0 ? "not-allowed" : "pointer",
+                marginBottom:12, transition:"all 0.2s",
+              }}
+            >{bossPriority.length===0 ? "⬆️ 업무를 먼저 선택해 주세요" : "✨ 대표 업무 지침서 생성"}</button>
+
+            {/* 결과 */}
+            {bossResult && (
+              <div style={card}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+                  <span style={{ fontWeight:700, fontSize:14, color:"#333" }}>👔 대표 업무 지침서</span>
+                  <button onClick={() => { navigator.clipboard.writeText(bossResult); setBossCopied(true); setTimeout(()=>setBossCopied(false),2000); }}
+                    style={{ padding:"6px 14px", borderRadius:8, border:"1px solid #764ba2", background:bossCopied?"#764ba2":"white", color:bossCopied?"white":"#764ba2", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                    {bossCopied ? "✅ 복사됨!" : "📋 복사하기"}
+                  </button>
+                </div>
+                <pre style={{ whiteSpace:"pre-wrap", wordBreak:"break-word", background:"#f9f9fc", borderRadius:10, padding:"16px", fontSize:13, lineHeight:1.8, color:"#333", border:"1px solid #eee", margin:0 }}>{bossResult}</pre>
+              </div>
+            )}
+
+            {/* 업무 노트 */}
+            <div style={{ ...card, marginTop:8 }}>
+              <label style={{ ...labelStyle, color:"#764ba2" }}>📝 업무 노트</label>
+              <textarea value={bossNote}
+                onChange={async (e) => { setBossNote(e.target.value); await set(ref(db,"bossNote"), e.target.value); }}
+                placeholder={"공유 사항, 지시 내용 등 자유롭게 적어주세요.\n예:\n• 이번 주 목요일 단체 촬영 예약 확인\n• 쿠팡 정산 날짜 체크\n• 릴스 15초 이하로 제작 요청"}
+                rows={6} style={{ ...inputStyle, resize:"vertical", lineHeight:1.8 }} />
+              <div style={{ marginTop:6, fontSize:11, color:"#43b89c", fontWeight:600 }}>✅ 자동 저장됩니다</div>
+            </div>
           </div>
         )}
 
