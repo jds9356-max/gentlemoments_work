@@ -221,6 +221,10 @@ export default function App() {
   const [bossResult, setBossResult] = useState("");
   const [bossCopied, setBossCopied] = useState(false);
   const [bossNote, setBossNote] = useState("");
+  const [bossChecklist, setBossChecklist] = useState({});
+  const [bossHistory, setBossHistory] = useState([]);
+  const [bossSaving, setBossSaving] = useState(false);
+  const [bossSaveSuccess, setBossSaveSuccess] = useState(false);
 
   // 실시간 날짜 — 분 단위로 갱신
   useEffect(() => {
@@ -240,8 +244,14 @@ export default function App() {
       } else setHistory([]);
     });
     const u2 = onValue(ref(db, "live"), (snap) => { if (snap.val()) setLiveDirective(snap.val()); });
+    const u3 = onValue(ref(db, "bossHistory"), (snap) => {
+      const data = snap.val();
+      if (data) {
+        setBossHistory(Object.entries(data).map(([k,v]) => ({...v, firebaseKey:k})).sort((a,b) => b.id-a.id).slice(0,50));
+      } else setBossHistory([]);
+    });
     const u4 = onValue(ref(db, "bossNote"), (snap) => { if (snap.val() !== null) setBossNote(snap.val()); });
-    return () => { u1(); u2(); u4(); };
+    return () => { u1(); u2(); u3(); u4(); };
   }, []);
 
   const toggleTemplate = (tid) => {
@@ -694,8 +704,26 @@ export default function App() {
 
             {/* 생성 버튼 */}
             <button
-              onClick={() => setBossResult(generateDirectiveText(bossDate, bossPriority, bossMemo, bossOptionMemos))}
-              disabled={bossPriority.length === 0}
+              onClick={async () => {
+                const text = generateDirectiveText(bossDate, bossPriority, bossMemo, bossOptionMemos);
+                const lines = text.split("\n").filter(l => /^\d+번째/.test(l));
+                const initCheck = {}; lines.forEach((_, i) => { initCheck[i] = false; });
+                setBossResult(text);
+                setBossChecklist(initCheck);
+                setBossSaving(true);
+                try {
+                  const item = {
+                    date: bossDate, priority: bossPriority, memo: bossMemo,
+                    optionMemos: bossOptionMemos, result: text,
+                    id: Date.now(), checks: initCheck, type: "boss",
+                  };
+                  const pushed = await push(ref(db, "bossHistory"), item);
+                  await set(ref(db, "bossLive"), { ...item, firebaseKey: pushed.key });
+                  setBossSaveSuccess(true); setTimeout(() => setBossSaveSuccess(false), 2500);
+                } catch(e) { console.error(e); }
+                setBossSaving(false);
+              }}
+              disabled={bossPriority.length === 0 || bossSaving}
               style={{
                 width:"100%", padding:"15px", borderRadius:12, border:"none",
                 background: bossPriority.length===0 ? "#c5c6d0" : "linear-gradient(135deg, #764ba2, #667eea)",
@@ -703,7 +731,13 @@ export default function App() {
                 cursor: bossPriority.length===0 ? "not-allowed" : "pointer",
                 marginBottom:12, transition:"all 0.2s",
               }}
-            >{bossPriority.length===0 ? "⬆️ 업무를 먼저 선택해 주세요" : "✨ 대표 업무 지침서 생성"}</button>
+            >{bossSaving ? "⏳ 저장 중..." : bossPriority.length===0 ? "⬆️ 업무를 먼저 선택해 주세요" : "✨ 대표 업무 지침서 생성 및 저장"}</button>
+
+            {bossSaveSuccess && (
+              <div style={{ background:"#f0fff4", border:"1px solid #86efac", borderRadius:10, padding:"12px 16px", marginBottom:12, fontSize:13, color:"#15803d", fontWeight:600, textAlign:"center" }}>
+                ✅ 저장 완료! 히스토리에 기록됐어요
+              </div>
+            )}
 
             {/* 결과 */}
             {bossResult && (
@@ -716,6 +750,56 @@ export default function App() {
                   </button>
                 </div>
                 <pre style={{ whiteSpace:"pre-wrap", wordBreak:"break-word", background:"#f9f9fc", borderRadius:10, padding:"16px", fontSize:13, lineHeight:1.8, color:"#333", border:"1px solid #eee", margin:0 }}>{bossResult}</pre>
+
+                {/* 대표 체크리스트 */}
+                {(() => {
+                  const checkItems = bossResult.split("\n").filter(l => /^\d+번째/.test(l));
+                  return checkItems.length > 0 ? (
+                    <div style={{ marginTop:16 }}>
+                      <div style={{ fontWeight:700, fontSize:13, color:"#555", marginBottom:8 }}>✅ 대표 업무 체크리스트</div>
+                      {checkItems.map((item, i) => (
+                        <label key={i} style={{
+                          display:"flex", alignItems:"center", gap:8,
+                          padding:"8px 10px", borderRadius:8,
+                          background: bossChecklist[i] ? "#f0fff4" : "#fafafa",
+                          marginBottom:6, cursor:"pointer",
+                          border:`1px solid ${bossChecklist[i] ? "#86efac" : "#eee"}`,
+                          transition:"all 0.2s",
+                        }}>
+                          <input type="checkbox" checked={!!bossChecklist[i]}
+                            onChange={async () => {
+                              const newChecks = { ...bossChecklist, [i]: !bossChecklist[i] };
+                              setBossChecklist(newChecks);
+                              // Firebase bossLive에도 체크 상태 반영
+                              await set(ref(db, "bossLive/checks"), newChecks);
+                            }}
+                            style={{ accentColor:"#764ba2", width:16, height:16 }} />
+                          <span style={{ fontSize:12, color: bossChecklist[i]?"#15803d":"#444", textDecoration: bossChecklist[i]?"line-through":"none" }}>
+                            {item}
+                          </span>
+                        </label>
+                      ))}
+                      {/* 진행바 */}
+                      <div style={{ marginTop:10 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#888", marginBottom:4 }}>
+                          <span>진행률</span>
+                          <span style={{ color:"#764ba2", fontWeight:700 }}>
+                            {checkItems.length > 0 ? Math.round(Object.values(bossChecklist).filter(Boolean).length / checkItems.length * 100) : 0}%
+                            ({Object.values(bossChecklist).filter(Boolean).length}/{checkItems.length})
+                          </span>
+                        </div>
+                        <div style={{ height:8, borderRadius:4, background:"#e8eaf0" }}>
+                          <div style={{
+                            height:"100%", borderRadius:4,
+                            background:"linear-gradient(90deg,#764ba2,#667eea)",
+                            width:`${checkItems.length > 0 ? Object.values(bossChecklist).filter(Boolean).length / checkItems.length * 100 : 0}%`,
+                            transition:"width 0.4s",
+                          }} />
+                        </div>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
               </div>
             )}
 
@@ -734,17 +818,18 @@ export default function App() {
         {/* ── 히스토리 ── */}
         {tab === "history" && (
           <div>
+            {/* 직원 업무 히스토리 */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-              <div style={{ fontWeight:700, fontSize:15, color:"#333" }}>🗂️ 과거 업무 지침 히스토리</div>
+              <div style={{ fontWeight:700, fontSize:15, color:"#333" }}>🗂️ 직원 업무 지침 히스토리</div>
               {history.length > 0 && (
-                <button onClick={async () => { if (window.confirm("히스토리를 전체 삭제할까요?")) await set(ref(db,"history"), null); }}
+                <button onClick={async () => { if (window.confirm("직원 히스토리를 전체 삭제할까요?")) await set(ref(db,"history"), null); }}
                   style={{ padding:"6px 12px", borderRadius:8, border:"1px solid #f5576c", background:"white", color:"#f5576c", fontSize:12, fontWeight:600, cursor:"pointer" }}>
                   🗑️ 전체 삭제
                 </button>
               )}
             </div>
             {history.length === 0 ? (
-              <div style={{ ...card, textAlign:"center", color:"#aaa", padding:40, fontSize:14 }}>아직 생성된 지침이 없어요.</div>
+              <div style={{ ...card, textAlign:"center", color:"#aaa", padding:32, fontSize:14 }}>아직 생성된 직원 지침이 없어요.</div>
             ) : history.map(h => (
               <HistoryCard key={h.firebaseKey||h.id} item={h}
                 onDelete={async (key) => { await remove(ref(db, `history/${key}`)); }}
@@ -758,6 +843,39 @@ export default function App() {
                   setSelectedOptions(new Set(item.priority||[]));
                   setResult(item.result||"");
                   setTab("create");
+                }}
+              />
+            ))}
+
+            {/* 대표 업무 히스토리 */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:24, marginBottom:14 }}>
+              <div style={{ fontWeight:700, fontSize:15, color:"#764ba2" }}>👔 대표 업무 히스토리</div>
+              {bossHistory.length > 0 && (
+                <button onClick={async () => { if (window.confirm("대표 업무 히스토리를 전체 삭제할까요?")) await set(ref(db,"bossHistory"), null); }}
+                  style={{ padding:"6px 12px", borderRadius:8, border:"1px solid #f5576c", background:"white", color:"#f5576c", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                  🗑️ 전체 삭제
+                </button>
+              )}
+            </div>
+            {bossHistory.length === 0 ? (
+              <div style={{ ...card, textAlign:"center", color:"#aaa", padding:32, fontSize:14 }}>아직 생성된 대표 업무가 없어요.</div>
+            ) : bossHistory.map(h => (
+              <BossHistoryCard key={h.firebaseKey||h.id} item={h}
+                onDelete={async (key) => { await remove(ref(db, `bossHistory/${key}`)); }}
+                onLoad={(item) => {
+                  setBossDate(item.date); setBossMemo(item.memo||"");
+                  setBossPriority(item.priority||[]);
+                  setBossOptionMemos(item.optionMemos||{});
+                  const tids = [...new Set((item.priority||[]).map(id=>OPTION_BY_ID[id]?.tid).filter(Boolean))];
+                  setBossActiveTemplates(tids);
+                  setBossActiveOptionTab(tids[0]||null);
+                  setBossSelectedOptions(new Set(item.priority||[]));
+                  setBossResult(item.result||"");
+                  setBossChecklist(item.checks||{});
+                  setTab("boss");
+                }}
+                onCheckChange={async (key, newChecks) => {
+                  await set(ref(db, `bossHistory/${key}/checks`), newChecks);
                 }}
               />
             ))}
@@ -981,3 +1099,104 @@ function HistoryCard({ item, onDelete, onLoad }) {
 const card = { background:"white", borderRadius:14, padding:"18px 16px", marginBottom:14, boxShadow:"0 2px 8px rgba(0,0,0,0.06)" };
 const labelStyle = { fontSize:13, fontWeight:600, color:"#555", marginBottom:8, display:"block" };
 const inputStyle = { width:"100%", padding:"10px 12px", borderRadius:10, border:"1.5px solid #e8eaf0", fontSize:13, color:"#333", outline:"none", boxSizing:"border-box", fontFamily:"inherit" };
+
+// ── 대표 업무 히스토리 카드 ───────────────────────────────
+function BossHistoryCard({ item, onDelete, onLoad, onCheckChange }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [localChecks, setLocalChecks] = useState(item.checks || {});
+
+  const checkItems = (item.result || "").split("\n").filter(l => /^\d+번째/.test(l));
+  const total = checkItems.length;
+  const done = Object.values(localChecks).filter(Boolean).length;
+
+  const handleCheck = async (i) => {
+    const newChecks = { ...localChecks, [i]: !localChecks[i] };
+    setLocalChecks(newChecks);
+    if (item.firebaseKey) await onCheckChange(item.firebaseKey, newChecks);
+  };
+
+  return (
+    <div style={{ ...card, marginBottom:10, borderLeft:"4px solid #764ba2" }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
+        <div>
+          <div style={{ fontWeight:700, fontSize:13, color:"#764ba2" }}>👔 {formatDate(item.date)}</div>
+          <div style={{ fontSize:11, color:"#999", marginTop:2 }}>
+            {(item.priority||[]).map(id => OPTION_BY_ID[id]?.label).filter(Boolean).join(", ").slice(0,45)}
+          </div>
+          {total > 0 && (
+            <div style={{ fontSize:11, marginTop:3 }}>
+              <span style={{ color: done===total ? "#764ba2" : "#f7971e", fontWeight:600 }}>
+                {done===total ? "✅ 완료" : `⏳ ${done}/${total} 완료`}
+              </span>
+            </div>
+          )}
+        </div>
+        <span style={{ color:"#bbb", fontSize:16 }}>{open ? "▲" : "▼"}</span>
+      </div>
+
+      {open && (
+        <div style={{ marginTop:12 }}>
+          {/* 액션 버튼 */}
+          <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
+            <button onClick={() => { navigator.clipboard.writeText(item.result); setCopied(true); setTimeout(()=>setCopied(false),2000); }}
+              style={{ padding:"6px 12px", borderRadius:7, border:"1px solid #764ba2", background:copied?"#764ba2":"white", color:copied?"white":"#764ba2", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+              {copied ? "✅ 복사됨" : "📋 복사"}
+            </button>
+            <button onClick={() => onLoad(item)}
+              style={{ padding:"6px 12px", borderRadius:7, border:"1px solid #f7971e", background:"white", color:"#f7971e", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+              ✏️ 불러와서 수정
+            </button>
+            {!confirmDelete ? (
+              <button onClick={() => setConfirmDelete(true)}
+                style={{ padding:"6px 12px", borderRadius:7, border:"1px solid #f5576c", background:"white", color:"#f5576c", fontSize:11, fontWeight:600, cursor:"pointer" }}>
+                🗑️ 삭제
+              </button>
+            ) : (
+              <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                <span style={{ fontSize:11, color:"#888" }}>정말?</span>
+                <button onClick={() => onDelete(item.firebaseKey)}
+                  style={{ padding:"5px 10px", borderRadius:7, border:"none", background:"#f5576c", color:"white", fontSize:11, fontWeight:700, cursor:"pointer" }}>삭제</button>
+                <button onClick={() => setConfirmDelete(false)}
+                  style={{ padding:"5px 10px", borderRadius:7, border:"1px solid #ddd", background:"white", color:"#888", fontSize:11, cursor:"pointer" }}>취소</button>
+              </div>
+            )}
+          </div>
+
+          <pre style={{ whiteSpace:"pre-wrap", wordBreak:"break-word", background:"#f9f9fc", borderRadius:8, padding:12, fontSize:12, lineHeight:1.7, color:"#333", border:"1px solid #eee", margin:0 }}>{item.result}</pre>
+
+          {/* 체크리스트 */}
+          {total > 0 && (
+            <div style={{ marginTop:12 }}>
+              <div style={{ fontWeight:700, fontSize:12, color:"#555", marginBottom:8 }}>✅ 업무 이행 체크</div>
+              {checkItems.map((ci, i) => (
+                <label key={i} style={{
+                  display:"flex", alignItems:"center", gap:8, padding:"7px 10px", borderRadius:8,
+                  background: localChecks[i] ? "#f5f0ff" : "#fafafa",
+                  marginBottom:5, cursor:"pointer",
+                  border:`1px solid ${localChecks[i] ? "#764ba2" : "#eee"}`,
+                  transition:"all 0.2s",
+                }}>
+                  <input type="checkbox" checked={!!localChecks[i]} onChange={() => handleCheck(i)}
+                    style={{ accentColor:"#764ba2", width:15, height:15 }} />
+                  <span style={{ fontSize:12, color: localChecks[i]?"#764ba2":"#444", textDecoration: localChecks[i]?"line-through":"none" }}>{ci}</span>
+                </label>
+              ))}
+              {/* 진행바 */}
+              <div style={{ marginTop:8 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"#888", marginBottom:3 }}>
+                  <span>진행률</span>
+                  <span style={{ color:"#764ba2", fontWeight:700 }}>{total > 0 ? Math.round(done/total*100) : 0}% ({done}/{total})</span>
+                </div>
+                <div style={{ height:6, borderRadius:3, background:"#e8eaf0" }}>
+                  <div style={{ height:"100%", borderRadius:3, background:"linear-gradient(90deg,#764ba2,#667eea)", width:`${total>0?done/total*100:0}%`, transition:"width 0.4s" }} />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
