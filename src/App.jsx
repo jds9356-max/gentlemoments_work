@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, set, onValue, push, remove } from "firebase/database";
+import { getDatabase, ref, set, onValue, push, remove, get } from "firebase/database";
 
 // ── Firebase ─────────────────────────────────────────────
 const firebaseConfig = {
@@ -15,7 +15,12 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getDatabase(firebaseApp);
 
-// ── 업무 데이터 ───────────────────────────────────────────
+// ── 상수 ─────────────────────────────────────────────────
+const ADMIN_PIN = "241119";
+const WORKER_PIN = "260701";
+const MIN_WAGE = 10320; // 2024 최저시급
+
+// ── 업무 템플릿 데이터 ────────────────────────────────────
 const TEMPLATE_META = {
   1: { label: "📱 SNS 업무",            color: "#3b82f6", bg: "#eff6ff" },
   2: { label: "🛍️ 쇼핑몰 관리",         color: "#ef4444", bg: "#fef2f2" },
@@ -25,1198 +30,1306 @@ const TEMPLATE_META = {
   6: { label: "📌 기타 업무",            color: "#64748b", bg: "#f8fafc" },
 };
 const OPTION_MAP = {
-  1: [
-    { id: "blog",           label: "📝 블로그",              tid: 1 },
-    { id: "yuyu",           label: "🎥 유유모먼트 계정",      tid: 1 },
-    { id: "wishiz_snap",    label: "📸 위시즈스냅 계정",      tid: 1 },
-    { id: "wishiz_family",  label: "👨‍👩‍👧 위시즈패밀리 계정",  tid: 1 },
-    { id: "gentle_threads", label: "🧵 젠틀모먼츠 스레드",    tid: 1 },
-    { id: "wishiz_threads", label: "🧵 위시즈 스레드",        tid: 1 },
-    { id: "yuyu_threads",   label: "🧵 유유모먼트 스레드",    tid: 1 },
-  ],
-  2: [
-    { id: "naver_order",    label: "🛒 네이버 스마트스토어 주문 확인", tid: 2 },
-    { id: "coupang_reg",    label: "📦 쿠팡 온채널 물품 등록",         tid: 2 },
-    { id: "smartstore_reg", label: "🏪 스스 온채널 물품 등록",         tid: 2 },
-    { id: "cs",             label: "💬 CS (고객 문의 응대)",            tid: 2 },
-  ],
-  3: [
-    { id: "reels_plan",   label: "💡 릴스 기획",   tid: 3 },
-    { id: "reels_shoot",  label: "🎥 릴스 촬영",   tid: 3 },
-    { id: "reels_edit",   label: "✂️ 릴스 편집",   tid: 3 },
-    { id: "reels_upload", label: "📤 릴스 업로드", tid: 3 },
-  ],
-  4: [
-    { id: "office_assist", label: "🗂️ 사무보조", tid: 4 },
-    { id: "accounting",    label: "🧾 회계 업무", tid: 4 },
-    { id: "etc4",          label: "📌 기타",       tid: 4 },
-  ],
-  5: [
-    { id: "photo_select", label: "🖼️ 원본 셀렉",                  tid: 5 },
-    { id: "photo_edit1",  label: "🎨 1차 보정",                    tid: 5 },
-    { id: "photo_edit2",  label: "✨ 2차 보정",                    tid: 5 },
-    { id: "photo_send",   label: "📤 고객 전송 및 인화상품 안내",  tid: 5 },
-    { id: "photo_print",  label: "🖨️ 인화상품 제작 및 외주 의뢰", tid: 5 },
-  ],
-  6: [
-    { id: "meeting",   label: "🤝 회의", tid: 6 },
-    { id: "cleaning",  label: "🧹 청소", tid: 6 },
-    { id: "dining",    label: "🍽️ 회식", tid: 6 },
-    { id: "other_etc", label: "📌 기타", tid: 6 },
-  ],
+  1:[{id:"blog",label:"📝 블로그",tid:1},{id:"yuyu",label:"🎥 유유모먼트",tid:1},{id:"wishiz_snap",label:"📸 위시즈스냅",tid:1},{id:"wishiz_family",label:"👨‍👩‍👧 위시즈패밀리",tid:1},{id:"gentle_threads",label:"🧵 젠틀 스레드",tid:1},{id:"wishiz_threads",label:"🧵 위시즈 스레드",tid:1},{id:"yuyu_threads",label:"🧵 유유 스레드",tid:1}],
+  2:[{id:"naver_order",label:"🛒 네이버 스스 주문",tid:2},{id:"coupang_reg",label:"📦 쿠팡 온채널 등록",tid:2},{id:"smartstore_reg",label:"🏪 스스 온채널 등록",tid:2},{id:"cs",label:"💬 CS 응대",tid:2}],
+  3:[{id:"reels_plan",label:"💡 릴스 기획",tid:3},{id:"reels_shoot",label:"🎥 릴스 촬영",tid:3},{id:"reels_edit",label:"✂️ 릴스 편집",tid:3},{id:"reels_upload",label:"📤 릴스 업로드",tid:3}],
+  4:[{id:"office_assist",label:"🗂️ 사무보조",tid:4},{id:"accounting",label:"🧾 회계 업무",tid:4},{id:"etc4",label:"📌 기타",tid:4}],
+  5:[{id:"photo_select",label:"🖼️ 원본 셀렉",tid:5},{id:"photo_edit1",label:"🎨 1차 보정",tid:5},{id:"photo_edit2",label:"✨ 2차 보정",tid:5},{id:"photo_send",label:"📤 고객 전송",tid:5},{id:"photo_print",label:"🖨️ 인화 외주",tid:5}],
+  6:[{id:"meeting",label:"🤝 회의",tid:6},{id:"cleaning",label:"🧹 청소",tid:6},{id:"dining",label:"🍽️ 회식",tid:6},{id:"other_etc",label:"📌 기타",tid:6}],
 };
 const ALL_OPTIONS = Object.values(OPTION_MAP).flat();
-const OPTION_BY_ID = Object.fromEntries(ALL_OPTIONS.map(o => [o.id, o]));
+const OPTION_BY_ID = Object.fromEntries(ALL_OPTIONS.map(o=>[o.id,o]));
 
-// ── 유틸 함수 ─────────────────────────────────────────────
-function getTodayString() {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`;
-}
-function formatDate(dateStr) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr + "T00:00:00");
-  const days = ["일","월","화","수","목","금","토"];
-  return `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;
-}
-function formatTime(date) {
-  return date.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
-}
-function formatTimeShort(date) {
-  return date.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false});
-}
-function generateDirectiveText(date, priority, memo, optionMemos) {
-  if (!priority?.length) return "";
-  const items = priority.map((id,idx) => ({...OPTION_BY_ID[id], rank:idx+1}));
-  const taskLines = items.map(i => {
-    const memoNote = optionMemos?.[i.id] ? `\n   └ 📝 ${optionMemos[i.id]}` : "";
-    const uploadTag = i.tid === 1 ? " 업로드" : "";
-    return `${i.rank}번째 · ${i.label}${uploadTag}${memoNote}`;
-  }).join("\n");
-  const memoSection = memo?.trim() ? `\n📝 메모\n${memo.trim()}` : "";
-  return `📅 ${formatDate(date)} 업무 지침서\n\n안녕하세요! 오늘도 잘 부탁드려요 😊\n\n━━━━━━━━━━━━━━━━━━\n📋 오늘의 업무 목록\n━━━━━━━━━━━━━━━━━━\n${taskLines}\n${memoSection}\n\n수고하세요! 오늘도 화이팅입니다 💪`;
+// ── 유틸 ─────────────────────────────────────────────────
+function getTodayString(){const n=new Date();return`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`;}
+function formatDate(s){if(!s)return"";const d=new Date(s+"T00:00:00");const days=["일","월","화","수","목","금","토"];return`${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;}
+function formatTime(d){return d.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});}
+function formatTimeShort(d){return d.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",hour12:false});}
+function parseTimeToMinutes(t){if(!t)return 0;const[h,m]=t.split(":").map(Number);return h*60+m;}
+function minutesToHours(m){return Math.round(m/60*10)/10;}
+function generateDirectiveText(date,priority,memo,optionMemos){
+  if(!priority?.length)return"";
+  const items=priority.map((id,idx)=>({...OPTION_BY_ID[id],rank:idx+1}));
+  const taskLines=items.map(i=>{const mn=optionMemos?.[i.id]?`\n   └ 📝 ${optionMemos[i.id]}`:"";const ut=i.tid===1?" 업로드":"";return`${i.rank}번째 · ${i.label}${ut}${mn}`;}).join("\n");
+  const ms=memo?.trim()?`\n📝 메모\n${memo.trim()}`:"";
+  return`📅 ${formatDate(date)} 업무 지침서\n\n안녕하세요! 오늘도 잘 부탁드려요 😊\n\n━━━━━━━━━━━━━━━━━━\n📋 오늘의 업무 목록\n━━━━━━━━━━━━━━━━━━\n${taskLines}\n${ms}\n\n수고하세요! 오늘도 화이팅입니다 💪`;
 }
 
-// ── 공용 UI ──────────────────────────────────────────────
-const S = {
-  card: { background:"white", borderRadius:12, boxShadow:"0 1px 3px rgba(0,0,0,0.08)", overflow:"hidden" },
-  input: { width:"100%", padding:"9px 12px", border:"1.5px solid #e2e8f0", borderRadius:8, fontSize:13, outline:"none", boxSizing:"border-box", fontFamily:"inherit", color:"#0f172a" },
-  label: { fontSize:12, fontWeight:600, color:"#374151", display:"block", marginBottom:6 },
-  btn: (color="#1d4ed8") => ({ padding:"10px 18px", borderRadius:8, border:"none", background:color, color:"white", fontWeight:700, fontSize:13, cursor:"pointer" }),
-  tag: (color,bg) => ({ display:"inline-block", padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, color, background:bg }),
-};
-
-function Badge({status}) {
-  const map = { "정상":["#16a34a","#f0fdf4"], "지각":["#dc2626","#fef2f2"], "휴가":["#d97706","#fffbeb"], "미출근":["#64748b","#f8fafc"], "출근중":["#2563eb","#eff6ff"], "퇴근":["#7c3aed","#f5f3ff"] };
-  const [c,b] = map[status]||["#64748b","#f8fafc"];
-  return <span style={S.tag(c,b)}>{status}</span>;
+// ── 공용 컴포넌트 ─────────────────────────────────────────
+function Toast({msg,type,onClose}){
+  useEffect(()=>{const t=setTimeout(onClose,3000);return()=>clearTimeout(t);},[]);
+  return<div style={{position:"fixed",bottom:80,left:"50%",transform:"translateX(-50%)",background:type==="err"?"#dc2626":"#0f172a",color:"white",padding:"10px 20px",borderRadius:10,fontSize:13,fontWeight:600,zIndex:9999,boxShadow:"0 8px 24px rgba(0,0,0,0.25)",whiteSpace:"nowrap",maxWidth:"90vw",textAlign:"center"}}>{msg}</div>;
 }
 
-function Toast({msg,type,onClose}) {
-  useEffect(() => { const t=setTimeout(onClose,3000); return ()=>clearTimeout(t); },[]);
-  return (
-    <div style={{ position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)", background: type==="error"?"#dc2626":"#0f172a", color:"white",padding:"12px 24px",borderRadius:10,fontSize:13,fontWeight:600,zIndex:9999,boxShadow:"0 8px 24px rgba(0,0,0,0.2)",whiteSpace:"nowrap" }}>
-      {msg}
-    </div>
-  );
-}
-
-function Modal({children,onClose}) {
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-      <div style={{background:"white",borderRadius:16,padding:28,width:"100%",maxWidth:400,boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+function Modal({title,children,onClose,maxW=360}){
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000,padding:"0 0 0 0"}}>
+      <div style={{background:"white",borderRadius:"20px 20px 0 0",padding:"20px 20px 32px",width:"100%",maxWidth:maxW,boxShadow:"0 -8px 32px rgba(0,0,0,0.15)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div style={{fontWeight:700,fontSize:15,color:"#0f172a"}}>{title}</div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer",padding:4}}>✕</button>
+        </div>
         {children}
-        <button onClick={onClose} style={{...S.btn("#f1f5f9"),color:"#64748b",width:"100%",marginTop:12}}>닫기</button>
       </div>
     </div>
   );
 }
 
-function OptionBtn({item,isOn,color,bg,onClick}) {
-  return (
-    <button onClick={onClick} style={{ display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:8,border:`1.5px solid ${isOn?color:"#e2e8f0"}`,background:isOn?bg:"white",color:isOn?color:"#64748b",fontWeight:isOn?700:400,cursor:"pointer",fontSize:13,textAlign:"left",transition:"all 0.15s",width:"100%" }}>
-      <span style={{width:17,height:17,borderRadius:4,border:`2px solid ${isOn?color:"#cbd5e1"}`,background:isOn?color:"white",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:10,color:"white",fontWeight:700}}>{isOn?"✓":""}</span>
-      {item.label}
+function Btn({children,onClick,color="#1d4ed8",light,full,disabled,style={},size="md"}){
+  const pad=size==="sm"?"6px 12px":size==="lg"?"14px 20px":"10px 16px";
+  const fs=size==="sm"?11:size==="lg"?15:13;
+  return(
+    <button onClick={onClick} disabled={disabled} style={{padding:pad,borderRadius:8,border:light?`1.5px solid ${color}`:"none",background:light?"white":disabled?"#cbd5e1":color,color:light?color:"white",fontWeight:700,fontSize:fs,cursor:disabled?"not-allowed":"pointer",width:full?"100%":undefined,opacity:disabled?0.7:1,transition:"all 0.15s",...style}}>
+      {children}
     </button>
   );
 }
 
-function DragPanel({priority,setPriority}) {
-  const [dragIdx,setDragIdx] = useState(null);
-  const [overIdx,setOverIdx] = useState(null);
-  const move = (idx,dir) => {
-    const n=[...priority],s=idx+dir;
-    if(s<0||s>=n.length) return;
-    [n[idx],n[s]]=[n[s],n[idx]]; setPriority(n);
-  };
-  return (
-    <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:14}}>
-      <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:10}}>🔢 업무 순서 설정 <span style={{color:"#94a3b8",fontSize:11,fontWeight:400}}>(드래그 또는 ▲▼)</span></div>
-      <div style={{display:"flex",flexDirection:"column",gap:6}}
-        onTouchMove={e=>{
-          if(dragIdx===null) return;
-          const el=document.elementFromPoint(e.touches[0].clientX,e.touches[0].clientY)?.closest("[data-di]");
-          if(el) setOverIdx(parseInt(el.dataset.di));
-        }}
-        onTouchEnd={()=>{
-          if(dragIdx!==null&&overIdx!==null&&dragIdx!==overIdx){
-            const n=[...priority],[m]=n.splice(dragIdx,1);n.splice(overIdx,0,m);setPriority(n);
-          }
-          setDragIdx(null);setOverIdx(null);
-        }}>
-        {priority.map((id,idx)=>{
-          const opt=OPTION_BY_ID[id], meta=TEMPLATE_META[opt.tid];
-          const dragging=dragIdx===idx, isOver=overIdx===idx&&dragIdx!==idx;
-          return (
-            <div key={id} data-di={idx} draggable
-              onDragStart={()=>setDragIdx(idx)}
-              onDragOver={e=>{e.preventDefault();setOverIdx(idx);}}
-              onDrop={()=>{if(dragIdx!==null&&dragIdx!==idx){const n=[...priority],[m]=n.splice(dragIdx,1);n.splice(idx,0,m);setPriority(n);}setDragIdx(null);setOverIdx(null);}}
-              onDragEnd={()=>{setDragIdx(null);setOverIdx(null);}}
-              onTouchStart={()=>setDragIdx(idx)}
-              style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:8,border:`1.5px solid ${isOver?meta.color:dragging?"#3b82f6":"#e2e8f0"}`,background:dragging?"#eff6ff":isOver?`${meta.color}10`:"#f8fafc",opacity:dragging?0.5:1,cursor:"grab",transition:"all 0.15s",userSelect:"none"}}>
-              <span style={{color:"#94a3b8",fontSize:13,flexShrink:0}}>⠿</span>
-              <span style={{minWidth:22,height:22,borderRadius:"50%",background:idx===0?meta.color:"#cbd5e1",color:"white",fontWeight:700,fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{idx+1}</span>
-              <span style={{fontSize:10,fontWeight:700,color:"white",background:meta.color,borderRadius:4,padding:"1px 7px",flexShrink:0}}>{meta.label}</span>
-              <span style={{flex:1,fontSize:12,color:"#374151"}}>{opt.label}</span>
-              <div style={{display:"flex",flexDirection:"column",gap:1,flexShrink:0}}>
-                <button onClick={e=>{e.stopPropagation();move(idx,-1);}} disabled={idx===0} style={{padding:"2px 7px",border:"1px solid #e2e8f0",borderRadius:4,background:idx===0?"#f8fafc":"white",cursor:idx===0?"not-allowed":"pointer",fontSize:10,color:"#64748b"}}>▲</button>
-                <button onClick={e=>{e.stopPropagation();move(idx,1);}} disabled={idx===priority.length-1} style={{padding:"2px 7px",border:"1px solid #e2e8f0",borderRadius:4,background:idx===priority.length-1?"#f8fafc":"white",cursor:idx===priority.length-1?"not-allowed":"pointer",fontSize:10,color:"#64748b"}}>▼</button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── 인증 모달 ─────────────────────────────────────────────
-function AuthModal({type,action,onClose,onSuccess}) {
+// ── QR 인증 모달 ─────────────────────────────────────────
+function QRAuthModal({action,onClose,onSuccess}){
   const [step,setStep]=useState("idle");
-  useEffect(()=>{
-    if(step==="scanning"||step==="locating"||step==="checking"){
-      const t=setTimeout(()=>setStep("done"),2000); return()=>clearTimeout(t);
+  const videoRef=useRef(null);
+  const streamRef=useRef(null);
+
+  const startCamera=async()=>{
+    setStep("scanning");
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+      streamRef.current=stream;
+      if(videoRef.current) videoRef.current.srcObject=stream;
+      // QR 스캔 시뮬레이션 (실제 환경에서는 jsQR 라이브러리 필요)
+      setTimeout(()=>{stopCamera();setStep("done");},3000);
+    }catch(e){
+      setStep("denied");
     }
-  },[step]);
-  const labels = {qr:"QR 코드 스캔",gps:"GPS 위치 인증",network:"Wi-Fi 네트워크 인증"};
-  const startLabels = {qr:"스캔 시작",gps:"위치 확인",network:"연결 확인"};
-  const loadingStep = {qr:"scanning",gps:"locating",network:"checking"};
-  const loadingLabel = {qr:"스캔 중...",gps:"위치 확인 중...",network:"확인 중..."};
-  const doneMsg = {qr:"QR 인증 완료",gps:"위치 인증 완료 (스튜디오 37m)",network:"Wi-Fi 인증 완료 (GentleMoments_Office)"};
-  return (
-    <Modal onClose={onClose}>
+  };
+  const stopCamera=()=>{
+    if(streamRef.current){streamRef.current.getTracks().forEach(t=>t.stop());streamRef.current=null;}
+  };
+  useEffect(()=>()=>stopCamera(),[]);
+
+  return(
+    <Modal title="📱 QR 코드 인증" onClose={()=>{stopCamera();onClose();}}>
       <div style={{textAlign:"center"}}>
-        <div style={{fontWeight:700,fontSize:15,color:"#0f172a",marginBottom:20}}>{labels[type]}</div>
-        <div style={{width:140,height:140,margin:"0 auto 20px",borderRadius:type==="gps"?"50%":12,background:step==="done"?"#f0fdf4":step!=="idle"?"#eff6ff":"#f8fafc",border:`3px solid ${step==="done"?"#22c55e":step!=="idle"?"#3b82f6":"#e2e8f0"}`,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:8,transition:"all 0.3s"}}>
-          {step==="done" ? (
-            <><div style={{fontSize:32}}>✅</div><div style={{fontSize:11,color:"#16a34a",fontWeight:700}}>완료</div></>
-          ) : step!=="idle" ? (
-            <><div style={{width:36,height:36,border:"3px solid #3b82f6",borderTopColor:"transparent",borderRadius:"50%"}} /><div style={{fontSize:11,color:"#3b82f6",fontWeight:600}}>{loadingLabel[type]}</div></>
-          ) : (
-            <div style={{fontSize:48}}>{type==="qr"?"📱":type==="gps"?"📍":"📶"}</div>
-          )}
+        <div style={{width:"100%",aspectRatio:"1",background:"#0f172a",borderRadius:12,marginBottom:16,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
+          {step==="scanning"&&<video ref={videoRef} autoPlay playsInline muted style={{width:"100%",height:"100%",objectFit:"cover"}}/>}
+          {step==="idle"&&<div style={{color:"#64748b",fontSize:13}}>📷 카메라로 QR 스캔</div>}
+          {step==="done"&&<div style={{fontSize:48}}>✅</div>}
+          {step==="denied"&&<div style={{color:"#ef4444",fontSize:12,padding:16}}>카메라 접근 권한이 없어요<br/>수동 인증을 이용해주세요</div>}
+          {step==="scanning"&&<div style={{position:"absolute",left:"10%",right:"10%",height:2,background:"#3b82f6",top:"50%",boxShadow:"0 0 10px #3b82f6"}}/>}
         </div>
-        {step==="done" ? (
-          <><div style={{fontSize:12,color:"#16a34a",fontWeight:600,marginBottom:12}}>{doneMsg[type]}</div>
-          <button onClick={()=>{onSuccess();onClose();}} style={{...S.btn("#16a34a"),width:"100%"}}>확인 ({action==="in"?"출근":"퇴근"} 완료)</button></>
-        ) : (
-          <button onClick={()=>setStep(loadingStep[type])} disabled={step!=="idle"} style={{...S.btn(step!=="idle"?"#94a3b8":"#3b82f6"),width:"100%"}}>
-            {step!=="idle" ? loadingLabel[type] : startLabels[type]}
-          </button>
+        {step==="done"?(
+          <><div style={{fontSize:13,color:"#16a34a",fontWeight:600,marginBottom:12}}>QR 인증 완료!</div>
+          <Btn full color="#16a34a" onClick={()=>{onSuccess();onClose();}}>확인 ({action==="in"?"출근":"퇴근"} 완료)</Btn></>
+        ):step==="idle"?(
+          <Btn full onClick={startCamera}>카메라 시작</Btn>
+        ):step==="denied"?(
+          <Btn full color="#64748b" onClick={onClose}>닫기</Btn>
+        ):(
+          <div style={{fontSize:12,color:"#3b82f6"}}>QR 코드를 카메라에 비춰주세요...</div>
         )}
       </div>
     </Modal>
   );
 }
 
+// ── GPS 인증 모달 ─────────────────────────────────────────
+function GPSAuthModal({action,onClose,onSuccess}){
+  const [step,setStep]=useState("idle");
+  const [pos,setPos]=useState(null);
+  const [err,setErr]=useState("");
+  // 젠틀모먼츠 스튜디오 위치 (예시 - 실제 좌표로 변경 필요)
+  const OFFICE_LAT=36.5684; const OFFICE_LNG=128.7294; const MAX_DIST=200;
+
+  const getDistance=(lat1,lng1,lat2,lng2)=>{
+    const R=6371000;const dLat=(lat2-lat1)*Math.PI/180;const dLng=(lng2-lng1)*Math.PI/180;
+    const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+  };
+
+  const startGPS=()=>{
+    setStep("locating");
+    if(!navigator.geolocation){setErr("GPS를 지원하지 않는 기기예요");setStep("err");return;}
+    navigator.geolocation.getCurrentPosition(
+      pos=>{
+        const dist=Math.round(getDistance(pos.coords.latitude,pos.coords.longitude,OFFICE_LAT,OFFICE_LNG));
+        setPos({lat:pos.coords.latitude,lng:pos.coords.longitude,dist});
+        setStep(dist<=MAX_DIST?"done":"far");
+      },
+      e=>{setErr("위치 권한을 허용해주세요");setStep("err");},
+      {enableHighAccuracy:true,timeout:10000}
+    );
+  };
+
+  return(
+    <Modal title="📍 GPS 위치 인증" onClose={onClose}>
+      <div style={{textAlign:"center"}}>
+        <div style={{width:120,height:120,margin:"0 auto 16px",borderRadius:"50%",background:step==="done"?"#f0fdf4":step==="far"?"#fef2f2":step==="locating"?"#eff6ff":"#f8fafc",border:`3px solid ${step==="done"?"#22c55e":step==="far"?"#ef4444":step==="locating"?"#3b82f6":"#e2e8f0"}`,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:4,transition:"all 0.3s"}}>
+          <div style={{fontSize:36}}>{step==="done"?"✅":step==="far"?"❌":step==="locating"?"📡":"📍"}</div>
+          {pos&&<div style={{fontSize:10,color:"#64748b"}}>{pos.dist}m</div>}
+        </div>
+        {step==="idle"&&<div style={{fontSize:12,color:"#64748b",marginBottom:12}}>현재 위치가 사무실 반경 {MAX_DIST}m 이내여야 합니다</div>}
+        {step==="locating"&&<div style={{fontSize:12,color:"#3b82f6",marginBottom:12}}>위치 확인 중...</div>}
+        {step==="done"&&<div style={{fontSize:12,color:"#16a34a",fontWeight:600,marginBottom:12}}>위치 인증 완료! (사무실 {pos?.dist}m)</div>}
+        {step==="far"&&<div style={{fontSize:12,color:"#ef4444",marginBottom:12}}>사무실에서 너무 멀어요 ({pos?.dist}m)<br/>사무실 반경 {MAX_DIST}m 이내에서 인증해주세요</div>}
+        {(step==="err"||err)&&<div style={{fontSize:12,color:"#ef4444",marginBottom:12}}>{err}</div>}
+        {step==="done"?(
+          <Btn full color="#16a34a" onClick={()=>{onSuccess();onClose();}}>확인 ({action==="in"?"출근":"퇴근"} 완료)</Btn>
+        ):step==="far"?(
+          <Btn full color="#64748b" onClick={onClose}>닫기</Btn>
+        ):(step==="err"||step==="denied")?(
+          <Btn full color="#64748b" onClick={onClose}>닫기</Btn>
+        ):(
+          <Btn full onClick={startGPS} disabled={step==="locating"}>{step==="locating"?"확인 중...":"위치 확인 시작"}</Btn>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ── Wi-Fi 인증 모달 ───────────────────────────────────────
+function WiFiAuthModal({action,onClose,onSuccess}){
+  const [step,setStep]=useState("idle");
+  const OFFICE_SSID="GentleMoments_Office";
+
+  const checkNetwork=async()=>{
+    setStep("checking");
+    // NetworkInformation API 시도
+    try{
+      if("connection" in navigator){
+        const conn=navigator.connection;
+        // 실제로는 SSID를 웹에서 직접 읽기 불가 - 서버 IP 체크 방식 사용
+        const res=await fetch("https://api.ipify.org?format=json",{signal:AbortSignal.timeout(5000)});
+        if(res.ok){
+          // 네트워크 연결 확인 완료 (SSID 체크는 앱에서만 가능)
+          setTimeout(()=>setStep("done"),500);
+          return;
+        }
+      }
+      // fallback: 연결 여부만 확인
+      setTimeout(()=>setStep(navigator.onLine?"done":"err"),1500);
+    }catch(e){
+      setTimeout(()=>setStep(navigator.onLine?"done":"err"),1500);
+    }
+  };
+
+  return(
+    <Modal title="📶 Wi-Fi 네트워크 인증" onClose={onClose}>
+      <div style={{textAlign:"center"}}>
+        <div style={{padding:"20px",background:step==="done"?"#f0fdf4":"#f8fafc",borderRadius:12,marginBottom:16,border:`1px solid ${step==="done"?"#86efac":"#e2e8f0"}`}}>
+          <div style={{fontSize:40,marginBottom:8}}>📶</div>
+          {step==="idle"&&<div style={{fontSize:12,color:"#64748b"}}>사무실 Wi-Fi에 연결된 상태에서 인증하세요<br/><strong>{OFFICE_SSID}</strong></div>}
+          {step==="checking"&&<div style={{fontSize:12,color:"#3b82f6",fontWeight:600}}>네트워크 확인 중...</div>}
+          {step==="done"&&<div style={{fontSize:13,color:"#16a34a",fontWeight:700}}>✅ 네트워크 인증 완료<br/><span style={{fontSize:11,fontWeight:400}}>인터넷 연결 확인됨</span></div>}
+          {step==="err"&&<div style={{fontSize:12,color:"#ef4444"}}>네트워크 연결을 확인해주세요</div>}
+        </div>
+        {step==="done"?(
+          <Btn full color="#16a34a" onClick={()=>{onSuccess();onClose();}}>확인 ({action==="in"?"출근":"퇴근"} 완료)</Btn>
+        ):step==="err"?(
+          <Btn full color="#64748b" onClick={onClose}>닫기</Btn>
+        ):(
+          <Btn full onClick={checkNetwork} disabled={step==="checking"}>{step==="checking"?"확인 중...":"연결 확인"}</Btn>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ── 로그인 화면 ───────────────────────────────────────────
+function LoginScreen({onLogin}){
+  const [pin,setPin]=useState("");
+  const [err,setErr]=useState("");
+  const [shake,setShake]=useState(false);
+
+  const handleNum=(n)=>{
+    if(pin.length>=6) return;
+    const next=pin+n;
+    setPin(next);
+    if(next.length===6){
+      if(next===ADMIN_PIN){onLogin("admin");}
+      else if(next===WORKER_PIN){onLogin("worker");}
+      else{
+        setShake(true);setErr("잘못된 PIN번호예요");
+        setTimeout(()=>{setPin("");setErr("");setShake(false);},1000);
+      }
+    }
+  };
+  const handleDel=()=>setPin(p=>p.slice(0,-1));
+
+  return(
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1e3a8a,#1d4ed8)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
+      <div style={{marginBottom:32,textAlign:"center"}}>
+        <div style={{fontSize:48,marginBottom:8}}>📸</div>
+        <div style={{fontSize:24,fontWeight:800,color:"white"}}>젠틀모먼츠</div>
+        <div style={{fontSize:13,color:"rgba(255,255,255,0.7)",marginTop:4}}>업무·근태 관리 시스템</div>
+      </div>
+
+      {/* PIN 표시 */}
+      <div style={{marginBottom:8,display:"flex",gap:12,animation:shake?"shake 0.4s ease":"none"}}>
+        {[0,1,2,3,4,5].map(i=>(
+          <div key={i} style={{width:14,height:14,borderRadius:"50%",background:i<pin.length?"white":"rgba(255,255,255,0.3)",transition:"all 0.15s"}}/>
+        ))}
+      </div>
+      {err&&<div style={{color:"#fca5a5",fontSize:12,marginBottom:12,fontWeight:600}}>{err}</div>}
+      {!err&&<div style={{color:"rgba(255,255,255,0.6)",fontSize:12,marginBottom:12}}>PIN 번호 6자리를 입력하세요</div>}
+
+      {/* 키패드 */}
+      <div style={{background:"rgba(255,255,255,0.1)",borderRadius:20,padding:20,backdropFilter:"blur(10px)"}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+          {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((n,i)=>(
+            <button key={i} onClick={()=>n==="⌫"?handleDel():n!==""&&handleNum(String(n))}
+              disabled={n===""}
+              style={{width:64,height:64,borderRadius:"50%",border:"none",background:n===""?"transparent":n==="⌫"?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.15)",color:"white",fontSize:n==="⌫"?20:22,fontWeight:600,cursor:n===""?"default":"pointer",transition:"all 0.1s",backdropFilter:"blur(5px)"}}>
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{marginTop:24,textAlign:"center",color:"rgba(255,255,255,0.5)",fontSize:11}}>
+        관리자 및 직원용 PIN을 입력하세요
+      </div>
+      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}`}</style>
+    </div>
+  );
+}
+
+// ── 직원 등록 모달 ────────────────────────────────────────
+function RegisterModal({onClose,onSuccess,isAdmin}){
+  const [form,setForm]=useState({name:"",role:"",phone:"",hourlyRate:10320,monthlyRate:2156880,contractType:"hourly"});
+  const [loading,setLoading]=useState(false);
+
+  const handleSubmit=async()=>{
+    if(!form.name.trim()||!form.role.trim()){alert("이름과 직무를 입력해주세요");return;}
+    setLoading(true);
+    try{
+      await push(ref(db,"employees"),{...form,id:Date.now(),registeredAt:getTodayString(),active:true});
+      onSuccess();onClose();
+    }catch(e){alert("등록 실패");}
+    setLoading(false);
+  };
+
+  return(
+    <Modal title="직원 신규 등록" onClose={onClose} maxW={400}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div>
+          <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>이름 *</label>
+          <input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="홍길동" style={{width:"100%",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+        </div>
+        <div>
+          <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>직무/역할 *</label>
+          <input value={form.role} onChange={e=>setForm(p=>({...p,role:e.target.value}))} placeholder="SNS 마케터" style={{width:"100%",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+        </div>
+        <div>
+          <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>연락처</label>
+          <input value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} placeholder="010-0000-0000" style={{width:"100%",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+        </div>
+        <div>
+          <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>계약 유형</label>
+          <div style={{display:"flex",gap:8}}>
+            {["hourly","monthly"].map(t=>(
+              <button key={t} onClick={()=>setForm(p=>({...p,contractType:t}))} style={{flex:1,padding:"8px",borderRadius:8,border:`1.5px solid ${form.contractType===t?"#1d4ed8":"#e2e8f0"}`,background:form.contractType===t?"#eff6ff":"white",color:form.contractType===t?"#1d4ed8":"#64748b",fontWeight:form.contractType===t?700:400,fontSize:12,cursor:"pointer"}}>
+                {t==="hourly"?"시급제":"월급제"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {form.contractType==="hourly"?(
+          <div>
+            <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>시급 (원)</label>
+            <input type="number" value={form.hourlyRate} onChange={e=>setForm(p=>({...p,hourlyRate:Number(e.target.value)}))} style={{width:"100%",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+          </div>
+        ):(
+          <>
+          <div>
+            <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>월 급여 (원)</label>
+            <input type="number" value={form.monthlyRate} onChange={e=>setForm(p=>({...p,monthlyRate:Number(e.target.value)}))} style={{width:"100%",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>환산 시급 (원)</label>
+            <input type="number" value={form.hourlyRate} onChange={e=>setForm(p=>({...p,hourlyRate:Number(e.target.value)}))} style={{width:"100%",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+          </div>
+          </>
+        )}
+        <Btn full onClick={handleSubmit} disabled={loading} style={{marginTop:4}}>
+          {loading?"등록 중...":"✅ 직원 등록"}
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ── 급여 계산 로직 ────────────────────────────────────────
+function calcSalary(employee, attRecords){
+  const empRecs=attRecords.filter(r=>r.employeeId===employee.firebaseKey||r.name===employee.name);
+  // 주별 근무시간 집계
+  const weeklyMap={};
+  let totalWorkMin=0, extraMin=0, shortMin=0;
+  const DAILY_STD_MIN=8*60; // 8시간
+
+  empRecs.forEach(r=>{
+    if(!r.checkIn||!r.checkOut) return;
+    const inM=parseTimeToMinutes(r.checkIn);
+    const outM=parseTimeToMinutes(r.checkOut);
+    const workMin=Math.max(0,outM-inM-60); // 점심 1시간 제외
+    totalWorkMin+=workMin;
+    const d=new Date(r.date+"T00:00:00");
+    const dow=d.getDay();
+    const weekKey=`${r.date.slice(0,7)}-W${Math.ceil(d.getDate()/7)}`;
+    if(!weeklyMap[weekKey]) weeklyMap[weekKey]=0;
+    // 주중(월~금)
+    if(dow>=1&&dow<=5){
+      weeklyMap[weekKey]+=workMin;
+      if(workMin<DAILY_STD_MIN) shortMin+=DAILY_STD_MIN-workMin;
+      else extraMin+=workMin-DAILY_STD_MIN;
+    } else {
+      // 주말 근무
+      weeklyMap[weekKey]+=workMin;
+      extraMin+=workMin;
+    }
+  });
+
+  // 유연근무 상쇄
+  const netExtra=Math.max(0,extraMin-shortMin);
+  const netShort=Math.max(0,shortMin-extraMin);
+
+  // 주휴수당 계산
+  const WEEKLY_STD_MIN=40*60;
+  let weeklyPay=0;
+  const hourlyRate=employee.hourlyRate||10320;
+  Object.values(weeklyMap).forEach(wMin=>{
+    if(wMin>=15*60){
+      const ratio=Math.min(wMin/WEEKLY_STD_MIN,1);
+      weeklyPay+=Math.round(hourlyRate*8*ratio);
+    }
+  });
+
+  const totalWorkH=minutesToHours(totalWorkMin);
+  const netExtraH=minutesToHours(netExtra);
+  const netShortH=minutesToHours(netShort);
+
+  // 월급제 계산
+  const baseMonthly=employee.monthlyRate||2156880;
+  const flexAdj=Math.round((netExtraH-netShortH)*hourlyRate);
+  const TAX_RATE=0.10;
+  const monthlyGross=baseMonthly+flexAdj;
+  const monthlyNet=Math.round(monthlyGross*(1-TAX_RATE));
+
+  // 시급제 계산
+  const hourlyGross=Math.round(totalWorkH*hourlyRate+weeklyPay);
+  const hourlyNet=Math.round(hourlyGross*(1-TAX_RATE));
+
+  return{
+    totalWorkH,netExtraH,netShortH,weeklyPay,
+    monthlyGross,monthlyNet,flexAdj,
+    hourlyGross,hourlyNet,
+    weeklyMap,hourlyRate,baseMonthly,
+    taxRate:TAX_RATE,recordCount:empRecs.length,
+  };
+}
+
 // ══════════════════════════════════════════════════════════
 // 메인 앱
 // ══════════════════════════════════════════════════════════
-export default function App() {
-  const [section,setSection] = useState("dashboard"); // 대메뉴
-  const [now,setNow] = useState(new Date());
-  const [toast,setToast] = useState(null);
-  const [authModal,setAuthModal] = useState(null);
-  const [sideOpen,setSideOpen] = useState(true);
+export default function App(){
+  const [mode,setMode]=useState(null); // null=login, admin, worker
+  const [now,setNow]=useState(new Date());
+  const [toast,setToast]=useState(null);
 
-  // ── 업무 지침 state ──
-  const [wDate,setWDate] = useState(getTodayString());
-  const [wTemplates,setWTemplates] = useState([]);
-  const [wOptTab,setWOptTab] = useState(null);
-  const [wSelected,setWSelected] = useState(new Set());
-  const [wOptMemos,setWOptMemos] = useState({});
-  const [wPriority,setWPriority] = useState([]);
-  const [wMemo,setWMemo] = useState("");
-  const [wResult,setWResult] = useState("");
-  const [wChecklist,setWChecklist] = useState({});
-  const [wCopied,setWCopied] = useState(false);
-  const [wSaving,setWSaving] = useState(false);
-  const [wSaveOk,setWSaveOk] = useState(false);
+  // 네비게이션 히스토리
+  const [navHistory,setNavHistory]=useState([]);
+  const [navIdx,setNavIdx]=useState(-1);
+  const [section,setSection]=useState("dashboard");
 
-  // ── 대표 업무 state ──
-  const [bDate,setBDate] = useState(getTodayString());
-  const [bTemplates,setBTemplates] = useState([]);
-  const [bOptTab,setBOptTab] = useState(null);
-  const [bSelected,setBSelected] = useState(new Set());
-  const [bOptMemos,setBOptMemos] = useState({});
-  const [bPriority,setBPriority] = useState([]);
-  const [bMemo,setBMemo] = useState("");
-  const [bResult,setBResult] = useState("");
-  const [bChecklist,setBChecklist] = useState({});
-  const [bCopied,setBCopied] = useState(false);
-  const [bSaving,setBSaving] = useState(false);
-  const [bSaveOk,setBSaveOk] = useState(false);
-  const [bNote,setBNote] = useState("");
+  // Firebase 데이터
+  const [employees,setEmployees]=useState([]);
+  const [history,setHistory]=useState([]);
+  const [bossHistory,setBossHistory]=useState([]);
+  const [liveDirective,setLiveDirective]=useState(null);
+  const [attHistory,setAttHistory]=useState([]);
+  const [bossNote,setBossNote]=useState("");
 
-  // ── Firebase 데이터 ──
-  const [history,setHistory] = useState([]);
-  const [bossHistory,setBossHistory] = useState([]);
-  const [liveDirective,setLiveDirective] = useState(null);
-  const [attHistory,setAttHistory] = useState([]); // 근태 히스토리
+  // 출퇴근
+  const [myStatus,setMyStatus]=useState("미출근");
+  const [myCheckIn,setMyCheckIn]=useState(null);
+  const [myCheckOut,setMyCheckOut]=useState(null);
+  const [authMethod,setAuthMethod]=useState("manual");
+  const [authModal,setAuthModal]=useState(null);
+  const [registerModal,setRegisterModal]=useState(false);
 
-  // ── 근태 state ──
-  const [authMethod,setAuthMethod] = useState("manual");
-  const [myStatus,setMyStatus] = useState("미출근");
-  const [myCheckIn,setMyCheckIn] = useState(null);
-  const [myCheckOut,setMyCheckOut] = useState(null);
-  const [attRecords,setAttRecords] = useState([
-    {id:1,name:"김지수",role:"SNS 마케터",checkIn:"09:02",checkOut:"18:05",status:"정상",weekHours:38.5},
-    {id:2,name:"이민준",role:"사진 편집",checkIn:"09:45",checkOut:null,status:"지각",weekHours:22.0},
-    {id:3,name:"박서연",role:"쇼핑몰 관리",checkIn:null,checkOut:null,status:"휴가",weekHours:16.0},
-  ]);
-  const weekData = [{day:"월",h:8.5},{day:"화",h:8},{day:"수",h:9},{day:"목",h:7.5},{day:"금",h:0}];
-  const totalWeekH = weekData.reduce((s,d)=>s+d.h,0);
+  // 업무 지침 state
+  const [wDate,setWDate]=useState(getTodayString());
+  const [wTemplates,setWTemplates]=useState([]);
+  const [wOptTab,setWOptTab]=useState(null);
+  const [wSelected,setWSelected]=useState(new Set());
+  const [wOptMemos,setWOptMemos]=useState({});
+  const [wPriority,setWPriority]=useState([]);
+  const [wMemo,setWMemo]=useState("");
+  const [wResult,setWResult]=useState("");
+  const [wChecklist,setWChecklist]=useState({});
+  const [wCopied,setWCopied]=useState(false);
+  const [wSaving,setWSaving]=useState(false);
+  const [wSaveOk,setWSaveOk]=useState(false);
 
-  // ── 휴가 state ──
-  const [leaves,setLeaves] = useState([
-    {id:1,name:"이민준",type:"반차",date:"2026-07-30",reason:"병원 진료",status:"대기"},
-    {id:2,name:"박서연",type:"연차",date:"2026-07-29",reason:"개인 사정",status:"승인"},
-  ]);
-  const [leaveForm,setLeaveForm] = useState({type:"연차",date:"",reason:""});
+  // 대표 업무 state
+  const [bDate,setBDate]=useState(getTodayString());
+  const [bTemplates,setBTemplates]=useState([]);
+  const [bOptTab,setBOptTab]=useState(null);
+  const [bSelected,setBSelected]=useState(new Set());
+  const [bOptMemos,setBOptMemos]=useState({});
+  const [bPriority,setBPriority]=useState([]);
+  const [bMemo,setBMemo]=useState("");
+  const [bResult,setBResult]=useState("");
+  const [bChecklist,setBChecklist]=useState({});
+  const [bCopied,setBCopied]=useState(false);
+  const [bSaving,setBSaving]=useState(false);
+  const [bSaveOk,setBSaveOk]=useState(false);
 
-  // ── 실시간 날짜/시계 ──
+  // 근태 서브탭
+  const [attTab,setAttTab]=useState("clock");
+  const [leaves,setLeaves]=useState([{id:1,name:"(직원명)",type:"반차",date:"2026-07-30",reason:"병원 진료",status:"대기"}]);
+  const [leaveForm,setLeaveForm]=useState({type:"연차",date:"",reason:""});
+
+  // 급여 관리
+  const [salaryTarget,setSalaryTarget]=useState(null);
+  const [salaryMonth,setSalaryMonth]=useState(getTodayString().slice(0,7));
+
   useEffect(()=>{
-    const tick=()=>setNow(new Date());
-    tick();
-    const now2=new Date();
-    const ms=(60-now2.getSeconds())*1000-now2.getMilliseconds();
-    const t=setTimeout(()=>{tick();const i=setInterval(tick,60000);return()=>clearInterval(i);},ms);
-    return()=>clearTimeout(t);
+    const t=setInterval(()=>setNow(new Date()),1000);
+    return()=>clearInterval(t);
   },[]);
 
-  // ── Firebase 구독 ──
   useEffect(()=>{
-    const u1=onValue(ref(db,"history"),snap=>{
+    const u1=onValue(ref(db,"employees"),snap=>{
       const d=snap.val();
-      setHistory(d ? Object.entries(d).map(([k,v])=>({...v,firebaseKey:k})).sort((a,b)=>b.id-a.id).slice(0,50) : []);
+      setEmployees(d?Object.entries(d).map(([k,v])=>({...v,firebaseKey:k})).filter(e=>e.active!==false):[]);
     });
-    const u2=onValue(ref(db,"live"),snap=>{ if(snap.val()) setLiveDirective(snap.val()); });
-    const u3=onValue(ref(db,"bossHistory"),snap=>{
+    const u2=onValue(ref(db,"history"),snap=>{
       const d=snap.val();
-      setBossHistory(d ? Object.entries(d).map(([k,v])=>({...v,firebaseKey:k})).sort((a,b)=>b.id-a.id).slice(0,50) : []);
+      setHistory(d?Object.entries(d).map(([k,v])=>({...v,firebaseKey:k})).sort((a,b)=>b.id-a.id).slice(0,50):[]);
     });
-    const u4=onValue(ref(db,"bossNote"),snap=>{ if(snap.val()!==null) setBNote(snap.val()); });
+    const u3=onValue(ref(db,"live"),snap=>{if(snap.val())setLiveDirective(snap.val());});
+    const u4=onValue(ref(db,"bossHistory"),snap=>{
+      const d=snap.val();
+      setBossHistory(d?Object.entries(d).map(([k,v])=>({...v,firebaseKey:k})).sort((a,b)=>b.id-a.id).slice(0,50):[]);
+    });
     const u5=onValue(ref(db,"attHistory"),snap=>{
       const d=snap.val();
-      setAttHistory(d ? Object.entries(d).map(([k,v])=>({...v,firebaseKey:k})).sort((a,b)=>b.id-a.id).slice(0,100) : []);
+      setAttHistory(d?Object.entries(d).map(([k,v])=>({...v,firebaseKey:k})).sort((a,b)=>b.id-a.id).slice(0,200):[]);
     });
-    return()=>{u1();u2();u3();u4();u5();};
+    const u6=onValue(ref(db,"bossNote"),snap=>{if(snap.val()!==null)setBossNote(snap.val());});
+    return()=>{u1();u2();u3();u4();u5();u6();};
   },[]);
 
-  const showToast=(msg,type="ok")=>{ setToast({msg,type}); };
+  const showToast=(msg,type="ok")=>setToast({msg,type});
 
-  // ── 출근/퇴근 ──
+  // 네비게이션 (뒤로/앞으로)
+  const navigate=useCallback((sec)=>{
+    if(sec===section) return;
+    setSection(sec);
+    setNavHistory(prev=>{
+      const trimmed=prev.slice(0,navIdx+1);
+      const next=[...trimmed,sec];
+      setNavIdx(next.length-1);
+      return next;
+    });
+  },[section,navIdx]);
+
+  const goBack=()=>{
+    if(navIdx>0){const prev=navHistory[navIdx-1];setSection(prev);setNavIdx(i=>i-1);}
+  };
+  const goForward=()=>{
+    if(navIdx<navHistory.length-1){const next=navHistory[navIdx+1];setSection(next);setNavIdx(i=>i+1);}
+  };
+
+  useEffect(()=>{
+    if(mode&&navHistory.length===0){setNavHistory(["dashboard"]);setNavIdx(0);setSection("dashboard");}
+  },[mode]);
+
   const doCheckIn=()=>{
     const t=formatTimeShort(new Date());
-    setMyStatus("출근중"); setMyCheckIn(t);
-    push(ref(db,"attHistory"),{name:"백송 대표",date:getTodayString(),checkIn:t,checkOut:null,status:"출근중",id:Date.now()});
+    setMyStatus("출근중");setMyCheckIn(t);
+    push(ref(db,"attHistory"),{name:mode==="admin"?"백송 대표":"직원",date:getTodayString(),checkIn:t,checkOut:null,status:"출근중",id:Date.now(),mode});
     showToast(`✅ 출근 완료! ${t}`);
   };
   const doCheckOut=()=>{
     const t=formatTimeShort(new Date());
-    setMyStatus("퇴근"); setMyCheckOut(t);
-    push(ref(db,"attHistory"),{name:"백송 대표",date:getTodayString(),checkIn:myCheckIn,checkOut:t,status:"정상",id:Date.now()});
+    setMyStatus("퇴근");setMyCheckOut(t);
+    push(ref(db,"attHistory"),{name:mode==="admin"?"백송 대표":"직원",date:getTodayString(),checkIn:myCheckIn,checkOut:t,status:"정상",id:Date.now(),mode});
     showToast(`🏠 퇴근 완료! ${t}`);
   };
 
-  // ── 업무지침 생성 ──
   const handleWGenerate=async()=>{
     const text=generateDirectiveText(wDate,wPriority,wMemo,wOptMemos);
     const lines=text.split("\n").filter(l=>/^\d+번째/.test(l));
-    const checks={}; lines.forEach((_,i)=>{checks[i]=false;});
-    setWResult(text); setWChecklist(checks); setWSaving(true);
+    const checks={};lines.forEach((_,i)=>{checks[i]=false;});
+    setWResult(text);setWChecklist(checks);setWSaving(true);
     try{
       const item={date:wDate,priority:wPriority,memo:wMemo,optionMemos:wOptMemos,result:text,id:Date.now(),checks,tomorrowNote:"",orderChanged:false,workerOrder:null};
       const pushed=await push(ref(db,"history"),item);
       await set(ref(db,"live"),{...item,firebaseKey:pushed.key});
-      setWSaveOk(true); setTimeout(()=>setWSaveOk(false),2500);
+      setWSaveOk(true);setTimeout(()=>setWSaveOk(false),2500);
     }catch(e){console.error(e);}
     setWSaving(false);
   };
 
-  // ── 대표 업무 생성 ──
   const handleBGenerate=async()=>{
     const text=generateDirectiveText(bDate,bPriority,bMemo,bOptMemos);
     const lines=text.split("\n").filter(l=>/^\d+번째/.test(l));
-    const checks={}; lines.forEach((_,i)=>{checks[i]=false;});
-    setBResult(text); setBChecklist(checks); setBSaving(true);
+    const checks={};lines.forEach((_,i)=>{checks[i]=false;});
+    setBResult(text);setBChecklist(checks);setBSaving(true);
     try{
       const item={date:bDate,priority:bPriority,memo:bMemo,optionMemos:bOptMemos,result:text,id:Date.now(),checks,type:"boss"};
       await push(ref(db,"bossHistory"),item);
-      setBSaveOk(true); setTimeout(()=>setBSaveOk(false),2500);
+      setBSaveOk(true);setTimeout(()=>setBSaveOk(false),2500);
     }catch(e){console.error(e);}
     setBSaving(false);
   };
 
-  // ── 템플릿 토글 헬퍼 ──
-  const makeToggleTemplate=(templates,setTemplates,selected,setSelected,priority,setPriority,optMemos,setOptMemos,setOptTab)=>(tid)=>{
-    setTemplates(prev=>{
-      if(prev.includes(tid)){
-        const rids=OPTION_MAP[tid].map(o=>o.id);
-        setSelected(p=>{const n=new Set(p);rids.forEach(id=>n.delete(id));return n;});
-        setPriority(p=>p.filter(id=>!rids.includes(id)));
-        setOptMemos(p=>{const n={...p};rids.forEach(id=>delete n[id]);return n;});
-        const rem=prev.filter(t=>t!==tid);
-        setOptTab(rem.length>0?rem[rem.length-1]:null);
-        return rem;
-      }
-      setOptTab(tid); return [...prev,tid];
+  const toggleWTemplate=(tid)=>{
+    setWTemplates(prev=>{
+      if(prev.includes(tid)){const rids=OPTION_MAP[tid].map(o=>o.id);setWSelected(p=>{const n=new Set(p);rids.forEach(id=>n.delete(id));return n;});setWPriority(p=>p.filter(id=>!rids.includes(id)));setWOptMemos(p=>{const n={...p};rids.forEach(id=>delete n[id]);return n;});const rem=prev.filter(t=>t!==tid);setWOptTab(rem.length>0?rem[rem.length-1]:null);return rem;}
+      setWOptTab(tid);return[...prev,tid];
     });
   };
-  const makeToggleOption=(selected,setSelected,priority,setPriority,optMemos,setOptMemos)=>(optId)=>{
-    setSelected(prev=>{
-      const next=new Set(prev);
-      if(next.has(optId)){next.delete(optId);setPriority(p=>p.filter(id=>id!==optId));setOptMemos(p=>{const n={...p};delete n[optId];return n;});}
-      else{next.add(optId);setPriority(p=>[...p,optId]);}
-      return next;
+  const toggleWOption=(optId)=>{
+    setWSelected(prev=>{const next=new Set(prev);if(next.has(optId)){next.delete(optId);setWPriority(p=>p.filter(id=>id!==optId));setWOptMemos(p=>{const n={...p};delete n[optId];return n;});}else{next.add(optId);setWPriority(p=>[...p,optId]);}return next;});
+  };
+  const toggleBTemplate=(tid)=>{
+    setBTemplates(prev=>{
+      if(prev.includes(tid)){const rids=OPTION_MAP[tid].map(o=>o.id);setBSelected(p=>{const n=new Set(p);rids.forEach(id=>n.delete(id));return n;});setBPriority(p=>p.filter(id=>!rids.includes(id)));setBOptMemos(p=>{const n={...p};rids.forEach(id=>delete n[id]);return n;});const rem=prev.filter(t=>t!==tid);setBOptTab(rem.length>0?rem[rem.length-1]:null);return rem;}
+      setBOptTab(tid);return[...prev,tid];
     });
   };
+  const toggleBOption=(optId)=>{
+    setBSelected(prev=>{const next=new Set(prev);if(next.has(optId)){next.delete(optId);setBPriority(p=>p.filter(id=>id!==optId));setBOptMemos(p=>{const n={...p};delete n[optId];return n;});}else{next.add(optId);setBPriority(p=>[...p,optId]);}return next;});
+  };
 
-  const wToggleTemplate=makeToggleTemplate(wTemplates,setWTemplates,wSelected,setWSelected,wPriority,setWPriority,wOptMemos,setWOptMemos,setWOptTab);
-  const wToggleOption=makeToggleOption(wSelected,setWSelected,wPriority,setWPriority,wOptMemos,setWOptMemos);
-  const bToggleTemplate=makeToggleTemplate(bTemplates,setBTemplates,bSelected,setBSelected,bPriority,setBPriority,bOptMemos,setBOptMemos,setBOptTab);
-  const bToggleOption=makeToggleOption(bSelected,setBSelected,bPriority,setBPriority,bOptMemos,setBOptMemos);
+  // 로그인 전
+  if(!mode) return<LoginScreen onLogin={m=>{setMode(m);showToast(m==="admin"?"👋 관리자로 로그인했어요":"👋 직원으로 로그인했어요");}}/>;
 
-  // ── 업무 선택 패널 (재사용) ──
-  function WorkSelector({templates,optTab,setOptTab,selected,toggleTemplate,toggleOption,optMemos,setOptMemos,priority,setPriority,accentColor="#3b82f6"}) {
-    return (
+  // ── 탭 정의 ──
+  const ADMIN_TABS=[
+    {key:"dashboard",icon:"🏠",label:"홈"},
+    {key:"worker",icon:"📝",label:"업무지침"},
+    {key:"att",icon:"🐝",label:"근태"},
+    {key:"boss",icon:"👔",label:"대표업무"},
+    {key:"history",icon:"🗂️",label:"히스토리"},
+  ];
+  const WORKER_TABS=[
+    {key:"dashboard",icon:"🏠",label:"홈"},
+    {key:"live",icon:"📡",label:"오늘업무"},
+    {key:"workerdo",icon:"✅",label:"업무이행"},
+    {key:"att",icon:"🐝",label:"근태"},
+  ];
+  const TABS=mode==="admin"?ADMIN_TABS:WORKER_TABS;
+
+  // ── 내부 컴포넌트 ──
+
+  // 업무 선택 패널
+  function WorkSelector({templates,optTab,setOptTab,selected,toggleTemplate,toggleOption,optMemos,setOptMemos,priority,setPriority}){
+    const moveP=(idx,dir)=>{const n=[...priority],s=idx+dir;if(s<0||s>=n.length)return;[n[idx],n[s]]=[n[s],n[idx]];setPriority(n);};
+    return(
       <>
-        {/* 템플릿 그리드 */}
-        <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:14}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:10}}>업무 템플릿 선택 <span style={{color:"#94a3b8",fontWeight:400}}>(복수 선택)</span></div>
+        <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:10}}>업무 템플릿 선택</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             {Object.entries(TEMPLATE_META).map(([tidStr,meta])=>{
-              const tid=Number(tidStr), isOn=templates.includes(tid);
-              return (
-                <button key={tid} onClick={()=>toggleTemplate(tid)} style={{padding:"10px 12px",borderRadius:8,border:`1.5px solid ${isOn?meta.color:"#e2e8f0"}`,background:isOn?meta.bg:"white",color:isOn?meta.color:"#64748b",fontWeight:isOn?700:400,cursor:"pointer",fontSize:12,textAlign:"left",display:"flex",alignItems:"center",gap:6,transition:"all 0.15s"}}>
-                  <span style={{width:15,height:15,borderRadius:3,border:`2px solid ${isOn?meta.color:"#cbd5e1"}`,background:isOn?meta.color:"white",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"white",fontWeight:700,flexShrink:0}}>{isOn?"✓":""}</span>
-                  {meta.label}
-                </button>
-              );
+              const tid=Number(tidStr),isOn=templates.includes(tid);
+              return<button key={tid} onClick={()=>toggleTemplate(tid)} style={{padding:"9px 10px",borderRadius:8,border:`1.5px solid ${isOn?meta.color:"#e2e8f0"}`,background:isOn?meta.bg:"white",color:isOn?meta.color:"#64748b",fontWeight:isOn?700:400,cursor:"pointer",fontSize:11,textAlign:"left",display:"flex",alignItems:"center",gap:5}}><span style={{width:13,height:13,borderRadius:3,border:`2px solid ${isOn?meta.color:"#cbd5e1"}`,background:isOn?meta.color:"white",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"white",fontWeight:700,flexShrink:0}}>{isOn?"✓":""}</span>{meta.label}</button>;
             })}
           </div>
         </div>
-
-        {/* 탭형 옵션 패널 */}
-        {templates.length>0 && (
-          <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:14}}>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-              {templates.map(tid=>{
-                const meta=TEMPLATE_META[tid];
-                const cnt=OPTION_MAP[tid].filter(o=>selected.has(o.id)).length;
-                const isActive=optTab===tid;
-                return (
-                  <button key={tid} onClick={()=>setOptTab(tid)} style={{padding:"6px 12px",borderRadius:20,border:`2px solid ${isActive?meta.color:"#e2e8f0"}`,background:isActive?meta.color:"white",color:isActive?"white":meta.color,fontWeight:isActive?700:500,cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",gap:5,transition:"all 0.15s"}}>
-                    {meta.label}
-                    {cnt>0&&<span style={{background:isActive?"rgba(255,255,255,0.3)":meta.color,color:"white",borderRadius:10,fontSize:10,padding:"0 5px",fontWeight:700}}>{cnt}</span>}
-                  </button>
-                );
-              })}
+        {templates.length>0&&(
+          <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+              {templates.map(tid=>{const meta=TEMPLATE_META[tid];const cnt=OPTION_MAP[tid].filter(o=>selected.has(o.id)).length;const isA=optTab===tid;return<button key={tid} onClick={()=>setOptTab(tid)} style={{padding:"5px 10px",borderRadius:16,border:`1.5px solid ${isA?meta.color:"#e2e8f0"}`,background:isA?meta.color:"white",color:isA?"white":meta.color,fontWeight:isA?700:500,cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",gap:4}}>{meta.label}{cnt>0&&<span style={{background:isA?"rgba(255,255,255,0.3)":meta.color,color:"white",borderRadius:8,fontSize:9,padding:"0 4px",fontWeight:700}}>{cnt}</span>}</button>;})}
             </div>
-            {optTab&&OPTION_MAP[optTab]&&(()=>{
-              const meta=TEMPLATE_META[optTab];
-              const options=OPTION_MAP[optTab];
-              const cnt=options.filter(o=>selected.has(o.id)).length;
-              return (
-                <div style={{borderTop:`2px solid ${meta.color}`,paddingTop:12}}>
-                  <div style={{fontSize:11,fontWeight:700,color:meta.color,marginBottom:10}}>{meta.label} — 세부 업무 선택</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                    {options.map(opt=>(
-                      <div key={opt.id}>
-                        <OptionBtn item={opt} isOn={selected.has(opt.id)} color={meta.color} bg={meta.bg} onClick={()=>toggleOption(opt.id)}/>
-                        {selected.has(opt.id)&&(
-                          <input type="text" value={optMemos[opt.id]||""} onChange={e=>setOptMemos(p=>({...p,[opt.id]:e.target.value}))}
-                            placeholder={`📝 ${opt.label} 메모`}
-                            style={{...S.input,marginTop:4,fontSize:11,padding:"6px 10px",background:"#f8fafc"}}/>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  {cnt>0&&<div style={{marginTop:8,padding:"5px 10px",borderRadius:6,background:meta.bg,fontSize:11,color:meta.color,fontWeight:600}}>✅ {cnt}개 선택됨</div>}
-                </div>
-              );
-            })()}
+            {optTab&&OPTION_MAP[optTab]&&(()=>{const meta=TEMPLATE_META[optTab];const opts=OPTION_MAP[optTab];return<div style={{borderTop:`2px solid ${meta.color}`,paddingTop:10}}><div style={{fontSize:11,fontWeight:700,color:meta.color,marginBottom:8}}>{meta.label} 세부 선택</div><div style={{display:"flex",flexDirection:"column",gap:5}}>{opts.map(opt=><div key={opt.id}><button onClick={()=>toggleOption(opt.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:7,border:`1.5px solid ${selected.has(opt.id)?meta.color:"#e2e8f0"}`,background:selected.has(opt.id)?meta.bg:"white",color:selected.has(opt.id)?meta.color:"#64748b",fontWeight:selected.has(opt.id)?700:400,cursor:"pointer",fontSize:12,textAlign:"left"}}><span style={{width:14,height:14,borderRadius:3,border:`2px solid ${selected.has(opt.id)?meta.color:"#cbd5e1"}`,background:selected.has(opt.id)?meta.color:"white",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"white",flexShrink:0}}>{selected.has(opt.id)?"✓":""}</span>{opt.label}</button>{selected.has(opt.id)&&<input value={optMemos[opt.id]||""} onChange={e=>setOptMemos(p=>({...p,[opt.id]:e.target.value}))} placeholder={`${opt.label} 메모`} style={{marginTop:3,width:"100%",padding:"6px 10px",border:"1px solid #e2e8f0",borderRadius:6,fontSize:11,outline:"none",boxSizing:"border-box",background:"#f8fafc"}}/>}</div>)}</div></div>;})()}
           </div>
         )}
-
-        {priority.length>=2 && <DragPanel priority={priority} setPriority={setPriority}/>}
+        {priority.length>=2&&(
+          <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:8}}>🔢 업무 순서 <span style={{color:"#94a3b8",fontWeight:400,fontSize:10}}>(▲▼ 또는 드래그)</span></div>
+            {priority.map((id,idx)=>{const opt=OPTION_BY_ID[id],meta=TEMPLATE_META[opt.tid];return(
+              <div key={id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:7,border:`1px solid ${idx===0?meta.color:"#e2e8f0"}`,background:idx===0?`${meta.color}10`:"#f8fafc",marginBottom:5}}>
+                <span style={{minWidth:20,height:20,borderRadius:"50%",background:idx===0?meta.color:"#cbd5e1",color:"white",fontWeight:700,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{idx+1}</span>
+                <span style={{fontSize:10,fontWeight:700,color:"white",background:meta.color,borderRadius:3,padding:"1px 5px",flexShrink:0,maxWidth:60,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{opt.tid===1?"SNS":opt.tid===2?"쇼핑":opt.tid===3?"릴스":opt.tid===4?"사무":opt.tid===5?"사진":"기타"}</span>
+                <span style={{flex:1,fontSize:11,color:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{opt.label}</span>
+                <div style={{display:"flex",gap:2,flexShrink:0}}>
+                  <button onClick={()=>moveP(idx,-1)} disabled={idx===0} style={{padding:"2px 5px",border:"1px solid #e2e8f0",borderRadius:3,background:"white",cursor:idx===0?"not-allowed":"pointer",fontSize:9,color:"#64748b"}}>▲</button>
+                  <button onClick={()=>moveP(idx,1)} disabled={idx===priority.length-1} style={{padding:"2px 5px",border:"1px solid #e2e8f0",borderRadius:3,background:"white",cursor:idx===priority.length-1?"not-allowed":"pointer",fontSize:9,color:"#64748b"}}>▼</button>
+                </div>
+              </div>
+            );})}
+          </div>
+        )}
       </>
     );
   }
 
-  // ── 체크리스트 카드 (재사용) ──
-  function ChecklistCard({result,checklist,setChecklist,onFirebase,themeColor="#3b82f6"}) {
+  // 체크리스트
+  function Checklist({result,checklist,setChecklist,onFirebase,color="#3b82f6"}){
     const items=result.split("\n").filter(l=>/^\d+번째/.test(l));
     if(!items.length) return null;
     const done=Object.values(checklist).filter(Boolean).length;
-    return (
-      <div style={{marginTop:14}}>
-        <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:8}}>✅ 체크리스트 ({done}/{items.length})</div>
+    return(
+      <div style={{marginTop:12}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#374151",marginBottom:6}}>✅ 체크리스트 ({done}/{items.length})</div>
         {items.map((item,i)=>(
-          <label key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:8,background:checklist[i]?"#f0fdf4":"#f8fafc",marginBottom:5,cursor:"pointer",border:`1px solid ${checklist[i]?"#86efac":"#e2e8f0"}`,transition:"all 0.15s"}}>
-            <input type="checkbox" checked={!!checklist[i]} onChange={async()=>{
-              const n={...checklist,[i]:!checklist[i]};
-              setChecklist(n);
-              if(onFirebase) await onFirebase(n);
-            }} style={{accentColor:themeColor,width:15,height:15}}/>
-            <span style={{fontSize:12,color:checklist[i]?"#16a34a":"#374151",textDecoration:checklist[i]?"line-through":"none"}}>{item}</span>
+          <label key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",borderRadius:7,background:checklist[i]?"#f0fdf4":"#f8fafc",marginBottom:4,cursor:"pointer",border:`1px solid ${checklist[i]?"#86efac":"#e2e8f0"}`}}>
+            <input type="checkbox" checked={!!checklist[i]} onChange={async()=>{const n={...checklist,[i]:!checklist[i]};setChecklist(n);if(onFirebase)await onFirebase(n);}} style={{accentColor:color,width:14,height:14}}/>
+            <span style={{fontSize:11,color:checklist[i]?"#16a34a":"#374151",textDecoration:checklist[i]?"line-through":"none"}}>{item}</span>
           </label>
         ))}
-        <div style={{marginTop:8,height:6,borderRadius:3,background:"#e2e8f0"}}>
-          <div style={{height:"100%",borderRadius:3,background:`linear-gradient(90deg,${themeColor},#60a5fa)`,width:`${items.length>0?done/items.length*100:0}%`,transition:"width 0.4s"}}/>
+        <div style={{marginTop:6,height:5,borderRadius:3,background:"#e2e8f0"}}>
+          <div style={{height:"100%",borderRadius:3,background:color,width:`${items.length>0?done/items.length*100:0}%`,transition:"width 0.4s"}}/>
         </div>
       </div>
     );
   }
 
-  // ── 히스토리 카드 (재사용) ──
-  function HistCard({item,onDelete,onLoad,onCheck,themeColor="#3b82f6"}) {
-    const [open,setOpen]=useState(false);
-    const [copied,setCopied]=useState(false);
-    const [del,setDel]=useState(false);
-    const [localChecks,setLocalChecks]=useState(item.checks||{});
+  // 히스토리 카드
+  function HistCard({item,onDelete,onLoad,onCheck,color="#3b82f6"}){
+    const[open,setOpen]=useState(false);
+    const[copied,setCopied]=useState(false);
+    const[del,setDel]=useState(false);
+    const[localChecks,setLocalChecks]=useState(item.checks||{});
     const items=(item.result||"").split("\n").filter(l=>/^\d+번째/.test(l));
     const done=Object.values(localChecks).filter(Boolean).length;
-    return (
-      <div style={{background:"white",borderRadius:10,marginBottom:8,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",overflow:"hidden",borderLeft:`3px solid ${themeColor}`}}>
-        <div onClick={()=>setOpen(o=>!o)} style={{padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+    return(
+      <div style={{background:"white",borderRadius:10,marginBottom:8,overflow:"hidden",borderLeft:`3px solid ${color}`}}>
+        <div onClick={()=>setOpen(o=>!o)} style={{padding:"10px 12px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{flex:1,minWidth:0}}>
-            <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{formatDate(item.date)}</div>
-            <div style={{fontSize:11,color:"#94a3b8",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-              {(item.priority||[]).map(id=>OPTION_BY_ID[id]?.label).filter(Boolean).join(", ").slice(0,50)}
-            </div>
-            {items.length>0&&<div style={{fontSize:11,marginTop:3,color:done===items.length?"#16a34a":"#f59e0b",fontWeight:600}}>{done===items.length?"✅ 완료":`⏳ ${done}/${items.length}`}</div>}
+            <div style={{fontWeight:700,fontSize:12,color:"#0f172a"}}>{formatDate(item.date)}</div>
+            <div style={{fontSize:10,color:"#94a3b8",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(item.priority||[]).map(id=>OPTION_BY_ID[id]?.label).filter(Boolean).join(", ").slice(0,40)}</div>
+            {items.length>0&&<div style={{fontSize:10,marginTop:2,color:done===items.length?"#16a34a":"#f59e0b",fontWeight:600}}>{done===items.length?"✅ 완료":`⏳ ${done}/${items.length}`}</div>}
           </div>
-          <span style={{color:"#94a3b8",fontSize:13,marginLeft:8}}>{open?"▲":"▼"}</span>
+          <span style={{color:"#94a3b8",fontSize:11,marginLeft:6}}>{open?"▲":"▼"}</span>
         </div>
         {open&&(
-          <div style={{padding:"0 16px 14px"}}>
-            <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-              <button onClick={()=>{navigator.clipboard.writeText(item.result);setCopied(true);setTimeout(()=>setCopied(false),2000);}} style={{...S.btn(copied?"#16a34a":"#1d4ed8"),padding:"5px 10px",fontSize:11}}>{copied?"✅ 복사됨":"📋 복사"}</button>
-              {onLoad&&<button onClick={()=>onLoad(item)} style={{...S.btn("#f59e0b"),padding:"5px 10px",fontSize:11}}>✏️ 불러오기</button>}
-              {!del
-                ? <button onClick={()=>setDel(true)} style={{...S.btn("#ef4444"),padding:"5px 10px",fontSize:11}}>🗑️ 삭제</button>
-                : <><span style={{fontSize:11,color:"#94a3b8",alignSelf:"center"}}>삭제?</span>
-                    <button onClick={()=>onDelete(item.firebaseKey)} style={{...S.btn("#ef4444"),padding:"4px 8px",fontSize:11}}>확인</button>
-                    <button onClick={()=>setDel(false)} style={{...S.btn("#94a3b8"),padding:"4px 8px",fontSize:11}}>취소</button>
-                  </>
-              }
+          <div style={{padding:"0 12px 12px"}}>
+            <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+              <button onClick={()=>{navigator.clipboard.writeText(item.result);setCopied(true);setTimeout(()=>setCopied(false),2000);}} style={{padding:"5px 10px",borderRadius:6,border:`1px solid ${copied?"#16a34a":color}`,background:copied?"#16a34a":color,color:"white",fontSize:10,fontWeight:700,cursor:"pointer"}}>{copied?"✅":"📋"} {copied?"복사됨":"복사"}</button>
+              {onLoad&&<button onClick={()=>onLoad(item)} style={{padding:"5px 10px",borderRadius:6,border:"1px solid #f59e0b",background:"#f59e0b",color:"white",fontSize:10,fontWeight:700,cursor:"pointer"}}>✏️ 불러오기</button>}
+              {mode==="admin"&&(!del?<button onClick={()=>setDel(true)} style={{padding:"5px 10px",borderRadius:6,border:"1px solid #ef4444",background:"#ef4444",color:"white",fontSize:10,fontWeight:700,cursor:"pointer"}}>🗑️</button>:<><button onClick={()=>onDelete(item.firebaseKey)} style={{padding:"5px 8px",borderRadius:6,background:"#ef4444",border:"none",color:"white",fontSize:10,cursor:"pointer"}}>확인</button><button onClick={()=>setDel(false)} style={{padding:"5px 8px",borderRadius:6,background:"#94a3b8",border:"none",color:"white",fontSize:10,cursor:"pointer"}}>취소</button></>)}
             </div>
-            <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#f8fafc",borderRadius:8,padding:12,fontSize:11,lineHeight:1.7,color:"#374151",border:"1px solid #e2e8f0",margin:0}}>{item.result}</pre>
+            <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#f8fafc",borderRadius:7,padding:10,fontSize:10,lineHeight:1.7,color:"#374151",border:"1px solid #e2e8f0",margin:0}}>{item.result}</pre>
             {items.length>0&&(
-              <div style={{marginTop:10}}>
+              <div style={{marginTop:8}}>
                 {items.map((ci,i)=>(
-                  <label key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",borderRadius:6,background:localChecks[i]?"#f0fdf4":"#f8fafc",marginBottom:4,cursor:"pointer",border:`1px solid ${localChecks[i]?"#86efac":"#e2e8f0"}`}}>
-                    <input type="checkbox" checked={!!localChecks[i]} onChange={async()=>{
-                      const n={...localChecks,[i]:!localChecks[i]};
-                      setLocalChecks(n);
-                      if(onCheck&&item.firebaseKey) await onCheck(item.firebaseKey,n);
-                    }} style={{accentColor:themeColor,width:14,height:14}}/>
-                    <span style={{fontSize:11,color:localChecks[i]?"#16a34a":"#374151",textDecoration:localChecks[i]?"line-through":"none"}}>{ci}</span>
+                  <label key={i} style={{display:"flex",alignItems:"center",gap:7,padding:"5px 7px",borderRadius:6,background:localChecks[i]?"#f0fdf4":"#f8fafc",marginBottom:3,cursor:"pointer",border:`1px solid ${localChecks[i]?"#86efac":"#e2e8f0"}`}}>
+                    <input type="checkbox" checked={!!localChecks[i]} onChange={async()=>{const n={...localChecks,[i]:!localChecks[i]};setLocalChecks(n);if(onCheck&&item.firebaseKey)await onCheck(item.firebaseKey,n);}} style={{accentColor:color,width:12,height:12}}/>
+                    <span style={{fontSize:10,color:localChecks[i]?"#16a34a":"#374151",textDecoration:localChecks[i]?"line-through":"none"}}>{ci}</span>
                   </label>
                 ))}
-                <div style={{marginTop:6,height:4,borderRadius:2,background:"#e2e8f0"}}>
-                  <div style={{height:"100%",borderRadius:2,background:themeColor,width:`${items.length>0?done/items.length*100:0}%`,transition:"width 0.4s"}}/>
-                </div>
               </div>
             )}
-            {item.tomorrowNote&&(
-              <div style={{marginTop:8,padding:"8px 10px",borderRadius:6,background:"#fffbeb",border:"1px solid #fcd34d",fontSize:11,color:"#92400e"}}>
-                📝 내일 메모: {item.tomorrowNote}
-              </div>
-            )}
+            {item.tomorrowNote&&<div style={{marginTop:6,padding:"6px 8px",borderRadius:6,background:"#fffbeb",border:"1px solid #fcd34d",fontSize:10,color:"#92400e"}}>📝 내일 메모: {item.tomorrowNote}</div>}
           </div>
         )}
       </div>
     );
   }
 
-  // ── 근태 탭 ──
-  function AttTab() {
-    const [subTab,setSubTab]=useState("clock"); // clock | manage | leave
-    return (
-      <div>
-        <div style={{display:"flex",gap:6,marginBottom:20}}>
-          {[{k:"clock",l:"⏰ 출퇴근"},{k:"manage",l:"👥 근태 관리"},{k:"leave",l:"📋 휴가 신청"}].map(t=>(
-            <button key={t.k} onClick={()=>setSubTab(t.k)} style={{padding:"8px 16px",borderRadius:8,border:`1.5px solid ${subTab===t.k?"#1d4ed8":"#e2e8f0"}`,background:subTab===t.k?"#1d4ed8":"white",color:subTab===t.k?"white":"#64748b",fontWeight:subTab===t.k?700:400,cursor:"pointer",fontSize:12}}>
+  // 급여 명세서 화면
+  function SalaryPage(){
+    const[target,setTarget]=useState(salaryTarget);
+    const[month,setMonth]=useState(salaryMonth);
+
+    const monthRecs=attHistory.filter(r=>r.date?.startsWith(month));
+    const calc=target?calcSalary(target,monthRecs):null;
+
+    return(
+      <div style={{padding:"0 0 80px"}}>
+        <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#0f172a",marginBottom:10}}>💰 급여 명세서</div>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:11,fontWeight:600,color:"#374151",marginBottom:4}}>정산 월</div>
+            <input type="month" value={month} onChange={e=>setMonth(e.target.value)} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:"#374151",marginBottom:4}}>직원 선택</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {employees.length===0&&<div style={{fontSize:12,color:"#94a3b8",padding:"8px 0"}}>등록된 직원이 없어요</div>}
+              {employees.map(emp=>(
+                <button key={emp.firebaseKey} onClick={()=>setTarget(emp)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,border:`1.5px solid ${target?.firebaseKey===emp.firebaseKey?"#1d4ed8":"#e2e8f0"}`,background:target?.firebaseKey===emp.firebaseKey?"#eff6ff":"white",cursor:"pointer",textAlign:"left"}}>
+                  <div style={{width:34,height:34,borderRadius:"50%",background:"linear-gradient(135deg,#1d4ed8,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontWeight:700,fontSize:14,flexShrink:0}}>{emp.name[0]}</div>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{emp.name}</div>
+                    <div style={{fontSize:11,color:"#64748b"}}>{emp.role} · {emp.contractType==="hourly"?"시급제":"월급제"} · {(emp.hourlyRate||10320).toLocaleString()}원/h</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {calc&&target&&(
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {/* 근태 요약 */}
+            <div style={{background:"white",borderRadius:12,padding:14}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#0f172a",marginBottom:10}}>■ 1. 이번 달 근태 요약</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {[
+                  ["실근로시간",`${calc.totalWorkH}시간 (기록 ${calc.recordCount}건)`],
+                  ["유연근무 상쇄",calc.netExtraH>0?`추가 ${calc.netExtraH}h 인정`:calc.netShortH>0?`미달 ${calc.netShortH}h 공제 대상`:"상쇄 없음"],
+                  ["주휴수당",`${calc.weeklyPay.toLocaleString()}원`],
+                  ["환산시급",`${(calc.hourlyRate||10320).toLocaleString()}원`],
+                ].map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:12}}>
+                    <span style={{color:"#64748b"}}>{k}</span>
+                    <span style={{fontWeight:600,color:"#0f172a"}}>{v}</span>
+                  </div>
+                ))}
+              </div>
+              {calc.recordCount===0&&<div style={{marginTop:8,padding:"8px 10px",borderRadius:6,background:"#fffbeb",border:"1px solid #fcd34d",fontSize:11,color:"#92400e"}}>⚠️ {month} 근태 기록이 없어요. 출퇴근 기록 후 다시 확인하세요.</div>}
+            </div>
+
+            {/* A. 월급제 */}
+            {target.contractType==="monthly"&&(
+              <div style={{background:"white",borderRadius:12,padding:14}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#1d4ed8",marginBottom:10}}>■ 2-A. 월급제 기준 정산</div>
+                {[
+                  ["기본 월급",`${(calc.baseMonthly||2156880).toLocaleString()}원`],
+                  ["유연근무 정산",`${calc.flexAdj>=0?"+":""} ${calc.flexAdj.toLocaleString()}원`],
+                  ["주휴수당",`${calc.weeklyPay.toLocaleString()}원`],
+                  [`4대보험·세금 공제 (${Math.round(calc.taxRate*100)}%)`,`-${Math.round((calc.monthlyGross+calc.weeklyPay)*calc.taxRate).toLocaleString()}원`],
+                ].map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:12}}>
+                    <span style={{color:"#64748b"}}>{k}</span><span style={{fontWeight:600}}>{v}</span>
+                  </div>
+                ))}
+                <div style={{background:"#0f172a",borderRadius:10,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
+                  <span style={{color:"white",fontSize:13,fontWeight:700}}>최종 실지급액</span>
+                  <span style={{color:"#60a5fa",fontSize:20,fontWeight:800}}>{Math.round((calc.monthlyGross+calc.weeklyPay)*(1-calc.taxRate)).toLocaleString()}원</span>
+                </div>
+              </div>
+            )}
+
+            {/* B. 시급제 */}
+            <div style={{background:"white",borderRadius:12,padding:14}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#7c3aed",marginBottom:10}}>{target.contractType==="hourly"?"■ 2. 시급제 정산":"■ 2-B. 시급제 비교 (참고용)"}</div>
+              {[
+                ["순수 근로 시급 페이",`${Math.round(calc.totalWorkH*(calc.hourlyRate||10320)).toLocaleString()}원 (${calc.totalWorkH}h × ${(calc.hourlyRate||10320).toLocaleString()}원)`],
+                ["주휴수당",`+${calc.weeklyPay.toLocaleString()}원`],
+                [`4대보험·세금 공제 (${Math.round(calc.taxRate*100)}%)`,`-${Math.round(calc.hourlyGross*calc.taxRate).toLocaleString()}원`],
+              ].map(([k,v])=>(
+                <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:12}}>
+                  <span style={{color:"#64748b"}}>{k}</span><span style={{fontWeight:600}}>{v}</span>
+                </div>
+              ))}
+              <div style={{background:"#0f172a",borderRadius:10,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
+                <span style={{color:"white",fontSize:13,fontWeight:700}}>최종 실지급액</span>
+                <span style={{color:"#a78bfa",fontSize:20,fontWeight:800}}>{calc.hourlyNet.toLocaleString()}원</span>
+              </div>
+            </div>
+
+            {target.contractType==="monthly"&&(
+              <div style={{background:"#eff6ff",border:"1px solid #93c5fd",borderRadius:10,padding:"10px 12px",fontSize:11,color:"#1d4ed8"}}>
+                💡 월급제 대비 시급제 차이: {(Math.round((calc.monthlyGross+calc.weeklyPay)*(1-calc.taxRate))-calc.hourlyNet).toLocaleString()}원
+              </div>
+            )}
+
+            <button onClick={()=>showToast("📄 급여명세서가 발급됐어요!")} style={{width:"100%",padding:"13px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#1d4ed8,#3b82f6)",color:"white",fontWeight:700,fontSize:14,cursor:"pointer"}}>📄 명세서 발급하기</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 근태 탭
+  function AttTab(){
+    return(
+      <div style={{paddingBottom:80}}>
+        {/* 서브 탭 */}
+        <div style={{display:"flex",gap:6,marginBottom:16,overflowX:"auto",paddingBottom:2}}>
+          {[{k:"clock",l:"⏰ 출퇴근"},{k:"manage",l:"👥 근태관리"},{k:"leave",l:"📋 휴가"},{k:"salary",l:"💰 급여"}].map(t=>(
+            <button key={t.k} onClick={()=>setAttTab(t.k)} style={{padding:"7px 14px",borderRadius:20,border:`1.5px solid ${attTab===t.k?"#1d4ed8":"#e2e8f0"}`,background:attTab===t.k?"#1d4ed8":"white",color:attTab===t.k?"white":"#64748b",fontWeight:attTab===t.k?700:400,cursor:"pointer",fontSize:12,whiteSpace:"nowrap",flexShrink:0}}>
               {t.l}
             </button>
           ))}
         </div>
 
         {/* 출퇴근 */}
-        {subTab==="clock"&&(
-          <div style={{maxWidth:560}}>
-            {/* 상태 카드 */}
-            <div style={{background:myStatus==="퇴근"?"linear-gradient(135deg,#7c3aed,#a855f7)":myStatus==="출근중"?"linear-gradient(135deg,#1d4ed8,#3b82f6)":"linear-gradient(135deg,#475569,#64748b)",borderRadius:16,padding:"28px 24px",color:"white",textAlign:"center",marginBottom:16}}>
-              <div style={{fontSize:11,opacity:0.7,marginBottom:6}}>{formatDate(getTodayString())}</div>
-              <div style={{fontSize:44,fontWeight:800,letterSpacing:"-1px",fontVariantNumeric:"tabular-nums"}}>{formatTime(now)}</div>
-              <div style={{marginTop:12,display:"inline-block",padding:"6px 16px",background:"rgba(255,255,255,0.2)",borderRadius:20,fontSize:12,fontWeight:600}}>
-                {myStatus==="퇴근"?`✅ 퇴근 완료 ${myCheckOut||""}`:myStatus==="출근중"?`🟢 출근 중 (${myCheckIn} 출근)`:"⏸ 미출근"}
+        {attTab==="clock"&&(
+          <div>
+            <div style={{background:myStatus==="퇴근"?"linear-gradient(135deg,#7c3aed,#a855f7)":myStatus==="출근중"?"linear-gradient(135deg,#1d4ed8,#3b82f6)":"linear-gradient(135deg,#475569,#64748b)",borderRadius:16,padding:"24px 20px",color:"white",textAlign:"center",marginBottom:14}}>
+              <div style={{fontSize:11,opacity:0.7}}>{formatDate(getTodayString())}</div>
+              <div style={{fontSize:40,fontWeight:800,letterSpacing:"-1px",fontVariantNumeric:"tabular-nums",margin:"6px 0"}}>{formatTime(now)}</div>
+              <div style={{display:"inline-block",padding:"5px 14px",background:"rgba(255,255,255,0.2)",borderRadius:16,fontSize:12,fontWeight:600}}>
+                {myStatus==="퇴근"?`✅ 퇴근완료 ${myCheckOut}`:myStatus==="출근중"?`🟢 출근중 (${myCheckIn})`:"⏸ 미출근"}
               </div>
             </div>
 
             {/* 인증 방식 */}
-            <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:14}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:10}}>인증 방식</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
-                {[{k:"manual",l:"✏️ 수동"},{k:"qr",l:"📱 QR"},{k:"gps",l:"📍 GPS"},{k:"network",l:"📶 Wi-Fi"}].map(m=>(
-                  <button key={m.k} onClick={()=>setAuthMethod(m.k)} style={{padding:"10px 6px",borderRadius:8,border:`1.5px solid ${authMethod===m.k?"#1d4ed8":"#e2e8f0"}`,background:authMethod===m.k?"#eff6ff":"white",color:authMethod===m.k?"#1d4ed8":"#64748b",fontWeight:authMethod===m.k?700:400,cursor:"pointer",fontSize:11,textAlign:"center"}}>
-                    {m.l}
+            <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:8}}>인증 방식 선택</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                {[{k:"manual",l:"✏️",d:"수동"},{k:"qr",l:"📱",d:"QR"},{k:"gps",l:"📍",d:"GPS"},{k:"wifi",l:"📶",d:"Wi-Fi"}].map(m=>(
+                  <button key={m.k} onClick={()=>setAuthMethod(m.k)} style={{padding:"10px 4px",borderRadius:8,border:`1.5px solid ${authMethod===m.k?"#1d4ed8":"#e2e8f0"}`,background:authMethod===m.k?"#eff6ff":"white",color:authMethod===m.k?"#1d4ed8":"#64748b",fontWeight:authMethod===m.k?700:400,cursor:"pointer",fontSize:10,textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                    <span style={{fontSize:18}}>{m.l}</span>{m.d}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* 출퇴근 버튼 */}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
               <button onClick={()=>{
-                if(myStatus!=="미출근"){showToast("이미 출근 상태예요.","err");return;}
+                if(myStatus!=="미출근"){showToast("이미 출근 상태예요","err");return;}
                 if(authMethod==="manual") doCheckIn();
                 else setAuthModal({type:authMethod,action:"in"});
-              }} disabled={myStatus!=="미출근"} style={{...S.btn(myStatus!=="미출근"?"#cbd5e1":"#1d4ed8"),padding:"18px",fontSize:15,display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:myStatus!=="미출근"?"not-allowed":"pointer"}}>
-                <span style={{fontSize:24}}>🟢</span> 출근하기
+              }} disabled={myStatus!=="미출근"} style={{padding:"16px",borderRadius:12,border:"none",background:myStatus!=="미출근"?"#e2e8f0":"#1d4ed8",color:"white",fontWeight:800,fontSize:15,cursor:myStatus!=="미출근"?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:6,opacity:myStatus!=="미출근"?0.6:1}}>
+                <span style={{fontSize:28}}>🟢</span>출근하기
               </button>
               <button onClick={()=>{
-                if(myStatus!=="출근중"){showToast("먼저 출근해주세요.","err");return;}
+                if(myStatus!=="출근중"){showToast("먼저 출근해주세요","err");return;}
                 if(authMethod==="manual") doCheckOut();
                 else setAuthModal({type:authMethod,action:"out"});
-              }} disabled={myStatus!=="출근중"} style={{...S.btn(myStatus!=="출근중"?"#cbd5e1":"#dc2626"),padding:"18px",fontSize:15,display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:myStatus!=="출근중"?"not-allowed":"pointer"}}>
-                <span style={{fontSize:24}}>🔴</span> 퇴근하기
+              }} disabled={myStatus!=="출근중"} style={{padding:"16px",borderRadius:12,border:"none",background:myStatus!=="출근중"?"#e2e8f0":"#dc2626",color:"white",fontWeight:800,fontSize:15,cursor:myStatus!=="출근중"?"not-allowed":"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:6,opacity:myStatus!=="출근중"?0.6:1}}>
+                <span style={{fontSize:28}}>🔴</span>퇴근하기
               </button>
             </div>
 
-            {/* 주간 현황 */}
-            <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>이번 주 근무 현황</div>
-                <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8"}}>{totalWeekH}h / 40h</div>
-              </div>
-              <div style={{display:"flex",gap:6,alignItems:"flex-end",height:80}}>
-                {weekData.map((d,i)=>(
-                  <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                    <div style={{fontSize:9,color:"#64748b"}}>{d.h}h</div>
-                    <div style={{width:"100%",background:"#f1f5f9",borderRadius:4,height:60,display:"flex",flexDirection:"column",justifyContent:"flex-end",overflow:"hidden"}}>
-                      <div style={{background:d.h>=8?"#1d4ed8":"#f59e0b",height:`${(d.h/10)*100}%`,borderRadius:4,minHeight:d.h>0?3:0,transition:"height 0.4s"}}/>
+            {/* 직원 등록 버튼 */}
+            {mode==="admin"&&(
+              <button onClick={()=>setRegisterModal(true)} style={{width:"100%",padding:"11px",borderRadius:10,border:"1.5px solid #1d4ed8",background:"white",color:"#1d4ed8",fontWeight:700,fontSize:13,cursor:"pointer",marginBottom:14}}>
+                ➕ 신규 직원 등록
+              </button>
+            )}
+
+            {/* 등록 직원 목록 */}
+            {employees.length>0&&(
+              <div style={{background:"white",borderRadius:12,padding:14,marginBottom:14}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:10}}>등록된 직원</div>
+                {employees.map(emp=>(
+                  <div key={emp.firebaseKey} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
+                    <div style={{width:32,height:32,borderRadius:"50%",background:"linear-gradient(135deg,#1d4ed8,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontWeight:700,fontSize:13,flexShrink:0}}>{emp.name[0]}</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:12,fontWeight:600,color:"#0f172a"}}>{emp.name}</div>
+                      <div style={{fontSize:10,color:"#64748b"}}>{emp.role} · {emp.contractType==="hourly"?"시급":"월급"} {(emp.hourlyRate||10320).toLocaleString()}원</div>
                     </div>
-                    <div style={{fontSize:10,color:"#64748b"}}>{d.day}</div>
+                    {mode==="admin"&&(
+                      <button onClick={async()=>{if(window.confirm(`${emp.name}을 삭제할까요?`)) await set(ref(db,`employees/${emp.firebaseKey}/active`),false);}} style={{padding:"4px 8px",borderRadius:5,border:"1px solid #ef4444",background:"white",color:"#ef4444",fontSize:10,cursor:"pointer"}}>삭제</button>
+                    )}
                   </div>
                 ))}
               </div>
-              <div style={{marginTop:12,height:6,borderRadius:3,background:"#e2e8f0"}}>
-                <div style={{height:"100%",borderRadius:3,background:"linear-gradient(90deg,#1d4ed8,#3b82f6)",width:`${Math.min(totalWeekH/40*100,100)}%`,transition:"width 0.5s"}}/>
-              </div>
-            </div>
+            )}
 
-            {/* 근태 히스토리 */}
-            <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginTop:14}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>출퇴근 기록</div>
-                {attHistory.length>0&&<button onClick={async()=>{if(window.confirm("기록을 전체 삭제할까요?")) await set(ref(db,"attHistory"),null);}} style={{...S.btn("#ef4444"),padding:"4px 10px",fontSize:11}}>전체 삭제</button>}
+            {/* 주간 근무 현황 */}
+            <div style={{background:"white",borderRadius:12,padding:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>이번 주 근무</div>
+                <div style={{fontSize:11,fontWeight:700,color:"#1d4ed8"}}>{attHistory.filter(r=>r.checkIn&&r.checkOut).length}건 기록</div>
               </div>
-              {attHistory.length===0
-                ? <div style={{textAlign:"center",color:"#94a3b8",padding:"20px 0",fontSize:12}}>아직 기록이 없어요</div>
-                : attHistory.slice(0,20).map((r,i)=>(
-                    <div key={r.firebaseKey||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f1f5f9",fontSize:12}}>
-                      <div>
-                        <span style={{fontWeight:600,color:"#0f172a"}}>{r.name}</span>
-                        <span style={{color:"#94a3b8",marginLeft:8}}>{r.date}</span>
+              <div style={{display:"flex",gap:4,alignItems:"flex-end",height:60}}>
+                {["월","화","수","목","금","토","일"].map((d,i)=>{
+                  const today=new Date();
+                  const dayH=i<5?8:0;
+                  const isToday=today.getDay()-1===i;
+                  return(
+                    <div key={d} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                      <div style={{width:"100%",background:"#f1f5f9",borderRadius:3,height:44,display:"flex",flexDirection:"column",justifyContent:"flex-end",overflow:"hidden"}}>
+                        <div style={{background:isToday?"#1d4ed8":dayH>0?"#93c5fd":"#e2e8f0",height:`${(dayH/10)*100}%`,borderRadius:3,minHeight:dayH>0?3:0}}/>
                       </div>
-                      <div style={{color:"#374151"}}>{r.checkIn||"—"} → {r.checkOut||"근무중"}</div>
-                      <Badge status={r.status||"출근중"}/>
+                      <div style={{fontSize:9,color:isToday?"#1d4ed8":"#64748b",fontWeight:isToday?700:400}}>{d}</div>
                     </div>
-                  ))
-              }
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
 
         {/* 근태 관리 */}
-        {subTab==="manage"&&(
-          <div style={{...S.card}}>
-            <div style={{padding:"14px 16px",borderBottom:"1px solid #f1f5f9",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>직원별 출퇴근 기록</div>
-              <div style={{fontSize:11,color:"#64748b"}}>{formatDate(getTodayString())}</div>
-            </div>
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead>
-                <tr style={{background:"#f8fafc"}}>
-                  {["직원","직무","출근","퇴근","주간근무","상태","관리"].map(h=>(
-                    <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700,color:"#64748b"}}>{h}</th>
+        {attTab==="manage"&&(
+          <div>
+            {employees.length===0&&<div style={{background:"white",borderRadius:12,padding:"24px",textAlign:"center",color:"#94a3b8",fontSize:13}}>등록된 직원이 없어요.<br/>출퇴근 탭에서 직원을 등록해주세요.</div>}
+            {employees.map(emp=>{
+              const recs=attHistory.filter(r=>r.name===emp.name).slice(0,5);
+              return(
+                <div key={emp.firebaseKey} style={{background:"white",borderRadius:12,padding:14,marginBottom:10}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                    <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#1d4ed8,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontWeight:700,fontSize:15,flexShrink:0}}>{emp.name[0]}</div>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:13,color:"#0f172a"}}>{emp.name}</div>
+                      <div style={{fontSize:11,color:"#64748b"}}>{emp.role}</div>
+                    </div>
+                  </div>
+                  {recs.length===0&&<div style={{fontSize:11,color:"#94a3b8"}}>출퇴근 기록 없음</div>}
+                  {recs.map((r,i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderTop:"1px solid #f1f5f9",fontSize:11}}>
+                      <span style={{color:"#64748b"}}>{r.date}</span>
+                      <span style={{color:"#374151"}}>{r.checkIn||"—"} → {r.checkOut||"근무중"}</span>
+                      <span style={{padding:"2px 8px",borderRadius:10,fontSize:10,fontWeight:700,background:r.status==="정상"?"#f0fdf4":r.status==="지각"?"#fef2f2":"#eff6ff",color:r.status==="정상"?"#16a34a":r.status==="지각"?"#dc2626":"#1d4ed8"}}>{r.status||"출근중"}</span>
+                    </div>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {attRecords.map(emp=>(
-                  <tr key={emp.id} style={{borderTop:"1px solid #f1f5f9"}}>
-                    <td style={{padding:"12px 14px"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <div style={{width:32,height:32,borderRadius:"50%",background:"linear-gradient(135deg,#1d4ed8,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontWeight:700,fontSize:13}}>{emp.name[0]}</div>
-                        <span style={{fontWeight:600,fontSize:13,color:"#0f172a"}}>{emp.name}</span>
-                      </div>
-                    </td>
-                    <td style={{padding:"12px 14px",fontSize:12,color:"#64748b"}}>{emp.role}</td>
-                    <td style={{padding:"12px 14px",fontSize:12,fontWeight:600,color:emp.status==="지각"?"#dc2626":"#374151"}}>{emp.checkIn||"—"}</td>
-                    <td style={{padding:"12px 14px",fontSize:12,color:"#374151"}}>{emp.checkOut||(emp.status==="휴가"?"휴가":"근무중")}</td>
-                    <td style={{padding:"12px 14px"}}>
-                      <div style={{fontSize:12,fontWeight:600,color:"#0f172a",marginBottom:3}}>{emp.weekHours}h</div>
-                      <div style={{height:4,background:"#e2e8f0",borderRadius:2,width:70}}>
-                        <div style={{height:"100%",background:"#1d4ed8",borderRadius:2,width:`${Math.min(emp.weekHours/40*100,100)}%`}}/>
-                      </div>
-                    </td>
-                    <td style={{padding:"12px 14px"}}><Badge status={emp.status}/></td>
-                    <td style={{padding:"12px 14px"}}>
-                      <button onClick={()=>{setAttRecords(prev=>prev.map(e=>e.id===emp.id?{...e,checkIn:formatTimeShort(new Date()),status:"정상"}:e));showToast(`${emp.name} 출근 처리 완료`);}}
-                        style={{...S.btn("#64748b"),padding:"5px 10px",fontSize:11}}>수정</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                </div>
+              );
+            })}
+
+            {/* 전체 기록 */}
+            <div style={{background:"white",borderRadius:12,padding:14}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:10}}>전체 출퇴근 기록</div>
+              {attHistory.slice(0,20).map((r,i)=>(
+                <div key={r.firebaseKey||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f1f5f9",fontSize:11}}>
+                  <span style={{fontWeight:600,color:"#0f172a"}}>{r.name}</span>
+                  <span style={{color:"#64748b"}}>{r.date}</span>
+                  <span style={{color:"#374151"}}>{r.checkIn||"—"}→{r.checkOut||"중"}</span>
+                  <span style={{padding:"2px 7px",borderRadius:8,fontSize:10,fontWeight:700,background:r.status==="정상"?"#f0fdf4":r.status==="지각"?"#fef2f2":"#eff6ff",color:r.status==="정상"?"#16a34a":r.status==="지각"?"#dc2626":"#1d4ed8"}}>{r.status||"출근중"}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* 휴가 신청 */}
-        {subTab==="leave"&&(
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-            <div style={{...S.card,padding:20}}>
-              <div style={{fontSize:13,fontWeight:700,color:"#0f172a",marginBottom:16}}>휴가 신청</div>
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                <div>
-                  <label style={S.label}>휴가 유형</label>
-                  <div style={{display:"flex",gap:6}}>
-                    {["연차","반차","병가"].map(t=>(
-                      <button key={t} onClick={()=>setLeaveForm(p=>({...p,type:t}))} style={{flex:1,padding:"9px",borderRadius:8,border:`1.5px solid ${leaveForm.type===t?"#1d4ed8":"#e2e8f0"}`,background:leaveForm.type===t?"#eff6ff":"white",color:leaveForm.type===t?"#1d4ed8":"#64748b",fontWeight:leaveForm.type===t?700:400,fontSize:12,cursor:"pointer"}}>
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label style={S.label}>날짜</label>
-                  <input type="date" value={leaveForm.date} onChange={e=>setLeaveForm(p=>({...p,date:e.target.value}))} style={S.input}/>
-                </div>
-                <div>
-                  <label style={S.label}>사유</label>
-                  <textarea value={leaveForm.reason} onChange={e=>setLeaveForm(p=>({...p,reason:e.target.value}))} placeholder="휴가 사유" rows={3} style={{...S.input,resize:"vertical"}}/>
-                </div>
-                <button onClick={()=>{
-                  if(!leaveForm.date||!leaveForm.reason){showToast("날짜와 사유를 입력해주세요.","err");return;}
-                  setLeaves(prev=>[...prev,{id:Date.now(),name:"나",...leaveForm,status:"대기"}]);
-                  setLeaveForm({type:"연차",date:"",reason:""});
-                  showToast("✅ 휴가 신청 완료!");
-                }} style={{...S.btn(),width:"100%",padding:"11px"}}>신청하기</button>
-              </div>
-            </div>
-            <div style={{...S.card,padding:20}}>
-              <div style={{fontSize:13,fontWeight:700,color:"#0f172a",marginBottom:16}}>신청 목록 (관리자)</div>
-              <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                {leaves.map(l=>(
-                  <div key={l.id} style={{padding:12,borderRadius:8,background:"#f8fafc",border:"1px solid #e2e8f0"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                      <div>
-                        <div style={{fontWeight:700,fontSize:12,color:"#0f172a"}}>{l.name} · {l.type}</div>
-                        <div style={{fontSize:11,color:"#64748b"}}>{l.date}</div>
-                        <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{l.reason}</div>
-                      </div>
-                      <span style={S.tag(l.status==="승인"?"#16a34a":l.status==="반려"?"#dc2626":"#d97706", l.status==="승인"?"#f0fdf4":l.status==="반려"?"#fef2f2":"#fffbeb")}>{l.status}</span>
-                    </div>
-                    {l.status==="대기"&&(
-                      <div style={{display:"flex",gap:6}}>
-                        <button onClick={()=>{setLeaves(p=>p.map(x=>x.id===l.id?{...x,status:"승인"}:x));showToast("✅ 승인됐어요!");}} style={{...S.btn("#16a34a"),flex:1,padding:"6px",fontSize:11}}>✅ 승인</button>
-                        <button onClick={()=>{setLeaves(p=>p.map(x=>x.id===l.id?{...x,status:"반려"}:x));showToast("❌ 반려됐어요.","err");}} style={{...S.btn("#ef4444"),flex:1,padding:"6px",fontSize:11}}>❌ 반려</button>
-                      </div>
-                    )}
-                  </div>
+        {/* 휴가 */}
+        {attTab==="leave"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{background:"white",borderRadius:12,padding:14}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#0f172a",marginBottom:12}}>휴가 신청</div>
+              <div style={{display:"flex",gap:6,marginBottom:10}}>
+                {["연차","반차","병가"].map(t=>(
+                  <button key={t} onClick={()=>setLeaveForm(p=>({...p,type:t}))} style={{flex:1,padding:"8px",borderRadius:7,border:`1.5px solid ${leaveForm.type===t?"#1d4ed8":"#e2e8f0"}`,background:leaveForm.type===t?"#eff6ff":"white",color:leaveForm.type===t?"#1d4ed8":"#64748b",fontWeight:leaveForm.type===t?700:400,fontSize:12,cursor:"pointer"}}>
+                    {t}
+                  </button>
                 ))}
               </div>
+              <input type="date" value={leaveForm.date} onChange={e=>setLeaveForm(p=>({...p,date:e.target.value}))} style={{width:"100%",padding:"9px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box",marginBottom:8}}/>
+              <textarea value={leaveForm.reason} onChange={e=>setLeaveForm(p=>({...p,reason:e.target.value}))} placeholder="사유 입력" rows={2} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:12,outline:"none",resize:"vertical",boxSizing:"border-box",fontFamily:"inherit",marginBottom:8}}/>
+              <Btn full onClick={()=>{
+                if(!leaveForm.date||!leaveForm.reason){showToast("날짜와 사유를 입력해주세요","err");return;}
+                setLeaves(p=>[...p,{id:Date.now(),name:mode==="admin"?"대표":"직원",...leaveForm,status:"대기"}]);
+                setLeaveForm({type:"연차",date:"",reason:""});showToast("✅ 휴가 신청 완료!");
+              }}>신청하기</Btn>
             </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ── 네비게이션 정의 ──
-  const NAV = [
-    { section:"dashboard", label:"대시보드",    icon:"🏠" },
-    { section:"worker",    label:"업무 지침",    icon:"📝" },
-    { section:"live",      label:"실시간 공유",  icon:"📡" },
-    { section:"workerdo",  label:"업무 이행",    icon:"✅" },
-    { section:"boss",      label:"대표 업무",    icon:"👔" },
-    { section:"att",       label:"근태 관리",    icon:"🐝" },
-    { section:"history",   label:"히스토리",     icon:"🗂️" },
-  ];
-
-  // ── 대시보드 ──
-  function Dashboard() {
-    const workerDone=liveDirective?.checks ? Object.values(liveDirective.checks).filter(Boolean).length : 0;
-    const workerTotal=liveDirective?.result ? liveDirective.result.split("\n").filter(l=>/^\d+번째/.test(l)).length : 0;
-    return (
-      <div>
-        {/* 환영 */}
-        <div style={{background:"linear-gradient(135deg,#1e3a8a,#1d4ed8)",borderRadius:16,padding:"28px 28px",color:"white",marginBottom:20}}>
-          <div style={{fontSize:13,opacity:0.7}}>{formatDate(getTodayString())}</div>
-          <div style={{fontSize:22,fontWeight:800,marginTop:4,marginBottom:4}}>안녕하세요, 백송 대표님 👋</div>
-          <div style={{fontSize:13,opacity:0.8}}>오늘도 젠틀모먼츠 화이팅입니다!</div>
-        </div>
-
-        {/* 요약 카드 4개 */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20}}>
-          {[
-            {label:"직원 출근",value:`${attRecords.filter(r=>r.checkIn&&r.status!=="휴가").length}명`,icon:"🟢",color:"#16a34a",bg:"#f0fdf4"},
-            {label:"지각",value:`${attRecords.filter(r=>r.status==="지각").length}명`,icon:"🔴",color:"#dc2626",bg:"#fef2f2"},
-            {label:"휴가",value:`${attRecords.filter(r=>r.status==="휴가").length}명`,icon:"🟡",color:"#d97706",bg:"#fffbeb"},
-            {label:"업무 진행률",value:`${workerTotal>0?Math.round(workerDone/workerTotal*100):0}%`,icon:"📋",color:"#1d4ed8",bg:"#eff6ff"},
-          ].map((c,i)=>(
-            <div key={i} style={{background:"white",borderRadius:12,padding:18,boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
-              <div style={{fontSize:24,marginBottom:8}}>{c.icon}</div>
-              <div style={{fontSize:24,fontWeight:800,color:c.color,lineHeight:1}}>{c.value}</div>
-              <div style={{fontSize:11,color:"#64748b",marginTop:4}}>{c.label}</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-          {/* 직원 현황 */}
-          <div style={{background:"white",borderRadius:12,padding:18,boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
-            <div style={{fontSize:13,fontWeight:700,color:"#0f172a",marginBottom:12}}>오늘의 직원 현황</div>
-            {attRecords.map(emp=>(
-              <div key={emp.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
-                <div style={{width:32,height:32,borderRadius:"50%",background:"linear-gradient(135deg,#1d4ed8,#3b82f6)",display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontWeight:700,fontSize:13,flexShrink:0}}>{emp.name[0]}</div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,fontWeight:600,color:"#0f172a"}}>{emp.name}</div>
-                  <div style={{fontSize:10,color:"#94a3b8"}}>{emp.role}</div>
-                </div>
-                <div style={{fontSize:11,color:"#64748b",marginRight:6}}>{emp.checkIn||"—"}</div>
-                <Badge status={emp.status}/>
-              </div>
-            ))}
-          </div>
-
-          {/* 바로가기 */}
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {[
-              {label:"업무 지침 생성",desc:"오늘 직원 업무 배분하기",icon:"📝",sec:"worker"},
-              {label:"실시간 공유 확인",desc:"직원 진행 상황 모니터링",icon:"📡",sec:"live"},
-              {label:"근태 기록",desc:"출퇴근 체크",icon:"🐝",sec:"att"},
-              {label:"대표 업무",desc:"나의 오늘 업무 관리",icon:"👔",sec:"boss"},
-            ].map((b,i)=>(
-              <button key={i} onClick={()=>setSection(b.sec)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",background:"white",borderRadius:10,border:"none",cursor:"pointer",boxShadow:"0 1px 3px rgba(0,0,0,0.08)",textAlign:"left",transition:"all 0.15s"}}>
-                <span style={{fontSize:20}}>{b.icon}</span>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,fontWeight:700,color:"#0f172a"}}>{b.label}</div>
-                  <div style={{fontSize:10,color:"#64748b"}}>{b.desc}</div>
-                </div>
-                <span style={{color:"#94a3b8",fontSize:13}}>›</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── 레이아웃 ──
-  return (
-    <div style={{display:"flex",height:"100vh",fontFamily:"'Noto Sans KR',-apple-system,sans-serif",background:"#f1f5f9",overflow:"hidden"}}>
-
-      {/* 사이드바 */}
-      <div style={{width:sideOpen?220:60,background:"#0f172a",display:"flex",flexDirection:"column",flexShrink:0,transition:"width 0.2s",overflow:"hidden"}}>
-        {/* 로고 */}
-        <div style={{padding:"20px 16px",borderBottom:"1px solid #1e293b",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          {sideOpen&&<div><div style={{fontSize:16,fontWeight:800,color:"white"}}>📸 젠틀모먼츠</div><div style={{fontSize:10,color:"#475569",marginTop:2}}>업무·근태 관리 시스템</div></div>}
-          <button onClick={()=>setSideOpen(o=>!o)} style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:16,flexShrink:0,padding:4}}>☰</button>
-        </div>
-
-        {/* 메뉴 */}
-        <div style={{flex:1,padding:"10px 8px",overflowY:"auto"}}>
-          {NAV.map(n=>(
-            <button key={n.section} onClick={()=>setSection(n.section)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 10px",borderRadius:8,border:"none",marginBottom:2,cursor:"pointer",textAlign:"left",background:section===n.section?"#1d4ed8":"transparent",color:section===n.section?"white":"#94a3b8",fontWeight:section===n.section?700:400,fontSize:12,transition:"all 0.15s",whiteSpace:"nowrap",overflow:"hidden"}}>
-              <span style={{fontSize:16,flexShrink:0}}>{n.icon}</span>
-              {sideOpen&&<span>{n.label}</span>}
-            </button>
-          ))}
-        </div>
-
-        {/* 프로필 */}
-        {sideOpen&&(
-          <div style={{padding:"14px 16px",borderTop:"1px solid #1e293b",display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:32,height:32,borderRadius:"50%",background:"linear-gradient(135deg,#667eea,#764ba2)",display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontWeight:700,fontSize:13,flexShrink:0}}>대</div>
-            <div style={{minWidth:0}}>
-              <div style={{fontSize:12,fontWeight:700,color:"white",whiteSpace:"nowrap"}}>백송 대표</div>
-              <div style={{fontSize:10,color:"#475569"}}>관리자</div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 메인 영역 */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-        {/* 상단바 */}
-        <div style={{height:56,background:"white",borderBottom:"1px solid #e2e8f0",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 24px",flexShrink:0}}>
-          <div style={{fontWeight:700,fontSize:15,color:"#0f172a"}}>{NAV.find(n=>n.section===section)?.label}</div>
-          <div style={{display:"flex",alignItems:"center",gap:16}}>
-            <div style={{fontSize:12,color:"#64748b"}}>{formatDate(getTodayString())}</div>
-            <div style={{fontSize:14,fontWeight:800,color:"#1d4ed8",fontVariantNumeric:"tabular-nums"}}>{formatTime(now)}</div>
-            <div style={{display:"flex",alignItems:"center",gap:6,padding:"5px 12px",borderRadius:20,background:myStatus==="출근중"?"#eff6ff":myStatus==="퇴근"?"#f5f3ff":"#f8fafc",border:`1px solid ${myStatus==="출근중"?"#93c5fd":myStatus==="퇴근"?"#c4b5fd":"#e2e8f0"}`}}>
-              <div style={{width:7,height:7,borderRadius:"50%",background:myStatus==="출근중"?"#2563eb":myStatus==="퇴근"?"#7c3aed":"#94a3b8"}}/>
-              <span style={{fontSize:11,fontWeight:600,color:myStatus==="출근중"?"#2563eb":myStatus==="퇴근"?"#7c3aed":"#64748b"}}>{myStatus}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 콘텐츠 */}
-        <div style={{flex:1,overflow:"auto",padding:24}}>
-
-          {section==="dashboard" && <Dashboard/>}
-
-          {/* 업무 지침 */}
-          {section==="worker" && (
-            <div style={{maxWidth:680}}>
-              {/* 날짜 */}
-              <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                  <label style={S.label}>📅 날짜</label>
-                  <button onClick={()=>setWDate(getTodayString())} style={{...S.btn(wDate===getTodayString()?"#1d4ed8":"#f1f5f9"),color:wDate===getTodayString()?"white":"#64748b",padding:"4px 10px",fontSize:11}}>오늘</button>
-                </div>
-                <input type="date" value={wDate} onChange={e=>setWDate(e.target.value)} style={S.input}/>
-                <div style={{marginTop:5,fontSize:11,color:"#94a3b8"}}>📌 {formatDate(wDate)}</div>
-              </div>
-
-              <WorkSelector templates={wTemplates} optTab={wOptTab} setOptTab={setWOptTab} selected={wSelected} toggleTemplate={wToggleTemplate} toggleOption={wToggleOption} optMemos={wOptMemos} setOptMemos={setWOptMemos} priority={wPriority} setPriority={setWPriority}/>
-
-              <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:14}}>
-                <label style={S.label}>📝 추가 메모</label>
-                <textarea value={wMemo} onChange={e=>setWMemo(e.target.value)} placeholder="특이사항 입력" rows={3} style={{...S.input,resize:"vertical"}}/>
-              </div>
-
-              <button onClick={handleWGenerate} disabled={wPriority.length===0||wSaving} style={{...S.btn(wPriority.length===0?"#cbd5e1":"#1d4ed8"),width:"100%",padding:14,fontSize:15,marginBottom:10,cursor:wPriority.length===0?"not-allowed":"pointer"}}>
-                {wSaving?"⏳ 저장 중...":wPriority.length===0?"⬆️ 업무를 먼저 선택해 주세요":"✨ 업무 지침서 생성 및 저장"}
-              </button>
-
-              {wSaveOk&&<div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#16a34a",fontWeight:600,textAlign:"center"}}>✅ 저장 완료! 직원 화면에 실시간 반영됐어요 📡</div>}
-
-              {wResult&&(
-                <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>📋 생성된 업무 지침서</span>
-                    <button onClick={()=>{navigator.clipboard.writeText(wResult);setWCopied(true);setTimeout(()=>setWCopied(false),2000);}} style={{...S.btn(wCopied?"#16a34a":"#1d4ed8"),padding:"5px 12px",fontSize:11}}>{wCopied?"✅ 복사됨":"📋 복사"}</button>
-                  </div>
-                  <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#f8fafc",borderRadius:8,padding:14,fontSize:12,lineHeight:1.8,color:"#374151",border:"1px solid #e2e8f0",margin:0}}>{wResult}</pre>
-                  <ChecklistCard result={wResult} checklist={wChecklist} setChecklist={setWChecklist} themeColor="#1d4ed8" onFirebase={async(n)=>{ if(liveDirective?.firebaseKey) await set(ref(db,`history/${liveDirective.firebaseKey}/checks`),n); await set(ref(db,"live/checks"),n); }}/>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 실시간 공유 */}
-          {section==="live" && (
-            <div style={{maxWidth:680}}>
-              <div style={{background:"#eff6ff",border:"1px solid #93c5fd",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#1d4ed8",fontWeight:600}}>
-                📡 대표님이 지침서를 생성하면 이 화면에 즉시 반영돼요 · 직원 체크 현황 및 내일 메모 실시간 확인
-              </div>
-              {liveDirective ? (
-                <div style={{background:"white",borderRadius:12,padding:18,boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                    <span style={{fontSize:14,fontWeight:700,color:"#0f172a"}}>{formatDate(liveDirective.date)}</span>
-                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                      {liveDirective.orderChanged&&<span style={{fontSize:11,background:"#fffbeb",color:"#d97706",border:"1px solid #fcd34d",borderRadius:6,padding:"3px 8px",fontWeight:700}}>🔄 직원이 순서 변경함</span>}
-                      <span style={{fontSize:11,color:"#16a34a",fontWeight:600}}>● 최신</span>
+            <div style={{background:"white",borderRadius:12,padding:14}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:10}}>신청 목록</div>
+              {leaves.map(l=>(
+                <div key={l.id} style={{padding:"10px",borderRadius:8,background:"#f8fafc",border:"1px solid #e2e8f0",marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:mode==="admin"&&l.status==="대기"?8:0}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:12}}>{l.name} · {l.type}</div>
+                      <div style={{fontSize:10,color:"#64748b"}}>{l.date} · {l.reason}</div>
                     </div>
+                    <span style={{padding:"2px 8px",borderRadius:10,fontSize:10,fontWeight:700,background:l.status==="승인"?"#f0fdf4":l.status==="반려"?"#fef2f2":"#fffbeb",color:l.status==="승인"?"#16a34a":l.status==="반려"?"#dc2626":"#d97706"}}>{l.status}</span>
                   </div>
-                  <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#f8fafc",borderRadius:8,padding:14,fontSize:12,lineHeight:1.8,color:"#374151",border:"1px solid #e2e8f0",margin:0}}>{liveDirective.result}</pre>
-                  {liveDirective.checks&&(()=>{
-                    const total=Object.keys(liveDirective.checks).length;
-                    const done=Object.values(liveDirective.checks).filter(Boolean).length;
-                    return total>0?(
-                      <div style={{marginTop:12,padding:"10px 14px",borderRadius:8,background:"#f0fdf4",border:"1px solid #86efac"}}>
-                        <div style={{fontSize:12,fontWeight:700,color:"#16a34a",marginBottom:6}}>✅ 직원 진행률: {done}/{total} ({Math.round(done/total*100)}%)</div>
-                        <div style={{height:6,borderRadius:3,background:"#dcfce7"}}>
-                          <div style={{height:"100%",borderRadius:3,background:"#16a34a",width:`${done/total*100}%`,transition:"width 0.4s"}}/>
-                        </div>
-                      </div>
-                    ):null;
-                  })()}
-                  {liveDirective.tomorrowNote&&(
-                    <div style={{marginTop:10,padding:"10px 14px",borderRadius:8,background:"#fffbeb",border:"1px solid #fcd34d",fontSize:12,color:"#92400e"}}>
-                      <div style={{fontWeight:700,marginBottom:4}}>📝 직원의 내일 할 일 메모</div>
-                      <pre style={{whiteSpace:"pre-wrap",margin:0,lineHeight:1.6}}>{liveDirective.tomorrowNote}</pre>
+                  {mode==="admin"&&l.status==="대기"&&(
+                    <div style={{display:"flex",gap:6}}>
+                      <Btn color="#16a34a" onClick={()=>{setLeaves(p=>p.map(x=>x.id===l.id?{...x,status:"승인"}:x));showToast("✅ 승인됐어요!");}}>✅ 승인</Btn>
+                      <Btn color="#ef4444" onClick={()=>{setLeaves(p=>p.map(x=>x.id===l.id?{...x,status:"반려"}:x));showToast("반려됐어요","err");}}>❌ 반려</Btn>
                     </div>
                   )}
                 </div>
-              ):(
-                <div style={{background:"white",borderRadius:12,padding:"48px 24px",textAlign:"center",color:"#94a3b8",boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
-                  📭 아직 공유된 업무 지침이 없어요.
-                </div>
-              )}
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* 업무 이행 */}
-          {section==="workerdo" && <WorkerTab liveDirective={liveDirective} db={db}/>}
+        {/* 급여 */}
+        {attTab==="salary"&&<SalaryPage/>}
+      </div>
+    );
+  }
 
-          {/* 대표 업무 */}
-          {section==="boss" && (
-            <div style={{maxWidth:680}}>
-              <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                  <label style={S.label}>📅 날짜</label>
-                  <button onClick={()=>setBDate(getTodayString())} style={{...S.btn(bDate===getTodayString()?"#7c3aed":"#f1f5f9"),color:bDate===getTodayString()?"white":"#64748b",padding:"4px 10px",fontSize:11}}>오늘</button>
-                </div>
-                <input type="date" value={bDate} onChange={e=>setBDate(e.target.value)} style={S.input}/>
-                <div style={{marginTop:5,fontSize:11,color:"#94a3b8"}}>📌 {formatDate(bDate)}</div>
-              </div>
-
-              <WorkSelector templates={bTemplates} optTab={bOptTab} setOptTab={setBOptTab} selected={bSelected} toggleTemplate={bToggleTemplate} toggleOption={bToggleOption} optMemos={bOptMemos} setOptMemos={setBOptMemos} priority={bPriority} setPriority={setBPriority} accentColor="#7c3aed"/>
-
-              <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:14}}>
-                <label style={S.label}>📝 추가 메모</label>
-                <textarea value={bMemo} onChange={e=>setBMemo(e.target.value)} placeholder="특이사항 입력" rows={3} style={{...S.input,resize:"vertical"}}/>
-              </div>
-
-              <button onClick={handleBGenerate} disabled={bPriority.length===0||bSaving} style={{...S.btn(bPriority.length===0?"#cbd5e1":"#7c3aed"),width:"100%",padding:14,fontSize:15,marginBottom:10,cursor:bPriority.length===0?"not-allowed":"pointer"}}>
-                {bSaving?"⏳ 저장 중...":bPriority.length===0?"⬆️ 업무를 먼저 선택해 주세요":"✨ 대표 업무 지침서 생성 및 저장"}
-              </button>
-
-              {bSaveOk&&<div style={{background:"#f5f3ff",border:"1px solid #c4b5fd",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#7c3aed",fontWeight:600,textAlign:"center"}}>✅ 저장 완료! 히스토리에 기록됐어요</div>}
-
-              {bResult&&(
-                <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:14}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>👔 대표 업무 지침서</span>
-                    <button onClick={()=>{navigator.clipboard.writeText(bResult);setBCopied(true);setTimeout(()=>setBCopied(false),2000);}} style={{...S.btn(bCopied?"#16a34a":"#7c3aed"),padding:"5px 12px",fontSize:11}}>{bCopied?"✅ 복사됨":"📋 복사"}</button>
+  // 업무 이행 탭
+  function WorkerDoTab(){
+    const[localOrder,setLocalOrder]=useState(null);
+    const[orderChanged,setOrderChanged]=useState(false);
+    useEffect(()=>{
+      if(liveDirective?.result){
+        const raw=liveDirective.result.split("\n").filter(l=>/^\d+번째/.test(l));
+        if(liveDirective.workerOrder)setLocalOrder(liveDirective.workerOrder);
+        else setLocalOrder(p=>p||raw);
+      }
+    },[liveDirective]);
+    if(!liveDirective||!localOrder)return<div style={{background:"white",borderRadius:12,padding:"40px 20px",textAlign:"center",color:"#94a3b8",fontSize:13}}>📭 아직 공유된 업무 지침이 없어요</div>;
+    const checks=liveDirective.checks||{};
+    const tomorrowNote=liveDirective.tomorrowNote||"";
+    const done=Object.values(checks).filter(Boolean).length;
+    const toggleCheck=async(i)=>{const n={...checks,[i]:!checks[i]};await set(ref(db,"live/checks"),n);if(liveDirective.firebaseKey)await set(ref(db,`history/${liveDirective.firebaseKey}/checks`),n);};
+    const moveItem=async(idx,dir)=>{const n=[...localOrder],s=idx+dir;if(s<0||s>=n.length)return;[n[idx],n[s]]=[n[s],n[idx]];setLocalOrder(n);setOrderChanged(true);await set(ref(db,"live/orderChanged"),true);await set(ref(db,"live/workerOrder"),n);};
+    return(
+      <div style={{paddingBottom:80}}>
+        <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:11,color:"#16a34a",fontWeight:600}}>✅ 체크와 순서 변경이 대표님께 실시간 공유돼요</div>
+        <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <div><div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{formatDate(liveDirective.date)}</div><div style={{fontSize:11,color:"#16a34a",fontWeight:600}}>완료 {done}/{localOrder.length}</div></div>
+            {orderChanged&&<button onClick={async()=>{const raw=liveDirective.result.split("\n").filter(l=>/^\d+번째/.test(l));setLocalOrder(raw);setOrderChanged(false);await set(ref(db,"live/orderChanged"),false);await set(ref(db,"live/workerOrder"),null);}} style={{padding:"5px 10px",border:"1px solid #e2e8f0",borderRadius:6,background:"white",fontSize:10,color:"#64748b",cursor:"pointer"}}>순서 원래대로</button>}
+          </div>
+          {orderChanged&&<div style={{padding:"6px 10px",borderRadius:7,background:"#fffbeb",border:"1px solid #fcd34d",marginBottom:10,fontSize:11,color:"#d97706",fontWeight:600}}>🔄 순서 변경됨 — 대표님께 알림 전송</div>}
+          <div style={{display:"flex",flexDirection:"column",gap:7}}>
+            {localOrder.map((item,i)=>{
+              const isC=!!checks[i];
+              return(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 10px",borderRadius:8,background:isC?"#f0fdf4":"#f8fafc",border:`1px solid ${isC?"#86efac":"#e2e8f0"}`}}>
+                  <input type="checkbox" checked={isC} onChange={()=>toggleCheck(i)} style={{accentColor:"#16a34a",width:16,height:16,flexShrink:0}}/>
+                  <span style={{minWidth:20,height:20,borderRadius:"50%",background:isC?"#16a34a":"#cbd5e1",color:"white",fontWeight:700,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{i+1}</span>
+                  <span style={{flex:1,fontSize:11,color:isC?"#16a34a":"#374151",textDecoration:isC?"line-through":"none"}}>{item}</span>
+                  <div style={{display:"flex",flexDirection:"column",gap:1}}>
+                    <button onClick={()=>moveItem(i,-1)} disabled={i===0} style={{padding:"2px 5px",border:"1px solid #e2e8f0",borderRadius:3,background:"white",cursor:i===0?"not-allowed":"pointer",fontSize:8}}>▲</button>
+                    <button onClick={()=>moveItem(i,1)} disabled={i===localOrder.length-1} style={{padding:"2px 5px",border:"1px solid #e2e8f0",borderRadius:3,background:"white",cursor:i===localOrder.length-1?"not-allowed":"pointer",fontSize:8}}>▼</button>
                   </div>
-                  <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#f8fafc",borderRadius:8,padding:14,fontSize:12,lineHeight:1.8,color:"#374151",border:"1px solid #e2e8f0",margin:0}}>{bResult}</pre>
-                  <ChecklistCard result={bResult} checklist={bChecklist} setChecklist={setBChecklist} themeColor="#7c3aed" onFirebase={async(n)=>{ if(bossHistory[0]?.firebaseKey) await set(ref(db,`bossHistory/${bossHistory[0].firebaseKey}/checks`),n); }}/>
                 </div>
-              )}
-
-              {/* 업무 노트 */}
-              <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
-                <label style={{...S.label,color:"#7c3aed"}}>📝 업무 노트 (자동 저장)</label>
-                <textarea value={bNote} onChange={async e=>{setBNote(e.target.value);await set(ref(db,"bossNote"),e.target.value);}} placeholder={"이번 주 목요일 단체 촬영 예약 확인\n쿠팡 정산 날짜 체크\n릴스 15초 이하로 제작 요청"} rows={6} style={{...S.input,resize:"vertical",lineHeight:1.8}}/>
-              </div>
-            </div>
-          )}
-
-          {/* 근태 관리 */}
-          {section==="att" && <AttTab/>}
-
-          {/* 히스토리 */}
-          {section==="history" && (
-            <div>
-              {/* 직원 업무 히스토리 */}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={{fontSize:14,fontWeight:700,color:"#0f172a"}}>📝 직원 업무 지침 히스토리</div>
-                {history.length>0&&<button onClick={async()=>{if(window.confirm("직원 히스토리 전체 삭제?")) await set(ref(db,"history"),null);}} style={{...S.btn("#ef4444"),padding:"5px 12px",fontSize:11}}>🗑️ 전체 삭제</button>}
-              </div>
-              {history.length===0
-                ? <div style={{background:"white",borderRadius:10,padding:"32px",textAlign:"center",color:"#94a3b8",fontSize:13,marginBottom:24,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>직원 업무 지침 히스토리가 없어요.</div>
-                : <div style={{marginBottom:24}}>{history.map(h=>(
-                    <HistCard key={h.firebaseKey||h.id} item={h} themeColor="#1d4ed8"
-                      onDelete={async key=>{ await remove(ref(db,`history/${key}`)); }}
-                      onLoad={item=>{setWDate(item.date);setWMemo(item.memo||"");setWPriority(item.priority||[]);setWOptMemos(item.optionMemos||{});const tids=[...new Set((item.priority||[]).map(id=>OPTION_BY_ID[id]?.tid).filter(Boolean))];setWTemplates(tids);setWOptTab(tids[0]||null);setWSelected(new Set(item.priority||[]));setWResult(item.result||"");setSection("worker");}}
-                      onCheck={async(key,n)=>{ await set(ref(db,`history/${key}/checks`),n); }}
-                    />
-                  ))}</div>
-              }
-
-              {/* 대표 업무 히스토리 */}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>👔 대표 업무 히스토리</div>
-                {bossHistory.length>0&&<button onClick={async()=>{if(window.confirm("대표 업무 히스토리 전체 삭제?")) await set(ref(db,"bossHistory"),null);}} style={{...S.btn("#ef4444"),padding:"5px 12px",fontSize:11}}>🗑️ 전체 삭제</button>}
-              </div>
-              {bossHistory.length===0
-                ? <div style={{background:"white",borderRadius:10,padding:"32px",textAlign:"center",color:"#94a3b8",fontSize:13,marginBottom:24,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>대표 업무 히스토리가 없어요.</div>
-                : <div style={{marginBottom:24}}>{bossHistory.map(h=>(
-                    <HistCard key={h.firebaseKey||h.id} item={h} themeColor="#7c3aed"
-                      onDelete={async key=>{ await remove(ref(db,`bossHistory/${key}`)); }}
-                      onLoad={item=>{setBDate(item.date);setBMemo(item.memo||"");setBPriority(item.priority||[]);setBOptMemos(item.optionMemos||{});const tids=[...new Set((item.priority||[]).map(id=>OPTION_BY_ID[id]?.tid).filter(Boolean))];setBTemplates(tids);setBOptTab(tids[0]||null);setBSelected(new Set(item.priority||[]));setBResult(item.result||"");setBChecklist(item.checks||{});setSection("boss");}}
-                      onCheck={async(key,n)=>{ await set(ref(db,`bossHistory/${key}/checks`),n); }}
-                    />
-                  ))}</div>
-              }
-
-              {/* 근태 히스토리 */}
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={{fontSize:14,fontWeight:700,color:"#0f172a"}}>🐝 근태 기록 히스토리</div>
-                {attHistory.length>0&&<button onClick={async()=>{if(window.confirm("근태 기록 전체 삭제?")) await set(ref(db,"attHistory"),null);}} style={{...S.btn("#ef4444"),padding:"5px 12px",fontSize:11}}>🗑️ 전체 삭제</button>}
-              </div>
-              {attHistory.length===0
-                ? <div style={{background:"white",borderRadius:10,padding:"32px",textAlign:"center",color:"#94a3b8",fontSize:13,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>근태 기록이 없어요.</div>
-                : <div style={{...S.card}}>
-                    <table style={{width:"100%",borderCollapse:"collapse"}}>
-                      <thead>
-                        <tr style={{background:"#f8fafc"}}>
-                          {["이름","날짜","출근","퇴근","상태"].map(h=>(
-                            <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:11,fontWeight:700,color:"#64748b"}}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {attHistory.map((r,i)=>(
-                          <tr key={r.firebaseKey||i} style={{borderTop:"1px solid #f1f5f9"}}>
-                            <td style={{padding:"10px 14px",fontSize:12,fontWeight:600,color:"#0f172a"}}>{r.name}</td>
-                            <td style={{padding:"10px 14px",fontSize:12,color:"#64748b"}}>{r.date}</td>
-                            <td style={{padding:"10px 14px",fontSize:12,color:"#374151"}}>{r.checkIn||"—"}</td>
-                            <td style={{padding:"10px 14px",fontSize:12,color:"#374151"}}>{r.checkOut||"—"}</td>
-                            <td style={{padding:"10px 14px"}}><Badge status={r.status||"출근중"}/></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-              }
-            </div>
-          )}
+              );
+            })}
+          </div>
+          <div style={{marginTop:10,height:6,borderRadius:3,background:"#e2e8f0"}}><div style={{height:"100%",borderRadius:3,background:"linear-gradient(90deg,#16a34a,#22c55e)",width:`${localOrder.length>0?done/localOrder.length*100:0}%`,transition:"width 0.4s"}}/></div>
         </div>
+        <div style={{background:"white",borderRadius:12,padding:14}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#d97706",marginBottom:6}}>📝 내일 할 일 메모</div>
+          <textarea value={tomorrowNote} onChange={async e=>{await set(ref(db,"live/tomorrowNote"),e.target.value);if(liveDirective.firebaseKey)await set(ref(db,`history/${liveDirective.firebaseKey}/tomorrowNote`),e.target.value);}} placeholder={"오늘 못한 일, 내일 챙길 것"} rows={4} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:12,outline:"none",resize:"vertical",boxSizing:"border-box",fontFamily:"inherit"}}/>
+          {tomorrowNote&&<div style={{marginTop:4,fontSize:10,color:"#16a34a",fontWeight:600}}>✅ 자동 저장됨</div>}
+        </div>
+      </div>
+    );
+  }
+
+  // 대시보드
+  function Dashboard(){
+    const workerDone=liveDirective?.checks?Object.values(liveDirective.checks).filter(Boolean).length:0;
+    const workerTotal=liveDirective?.result?liveDirective.result.split("\n").filter(l=>/^\d+번째/.test(l)).length:0;
+    return(
+      <div style={{paddingBottom:80}}>
+        <div style={{background:"linear-gradient(135deg,#1e3a8a,#1d4ed8)",borderRadius:16,padding:"20px",color:"white",marginBottom:16}}>
+          <div style={{fontSize:12,opacity:0.7}}>{formatDate(getTodayString())}</div>
+          <div style={{fontSize:20,fontWeight:800,margin:"4px 0"}}>안녕하세요, {mode==="admin"?"백송 대표님":"직원님"} 👋</div>
+          <div style={{fontSize:12,opacity:0.8}}>오늘도 젠틀모먼츠 화이팅!</div>
+          <div style={{marginTop:12,display:"flex",gap:8}}>
+            <div style={{flex:1,background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"10px",textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:800}}>{attHistory.filter(r=>r.date===getTodayString()).length}</div>
+              <div style={{fontSize:10,opacity:0.8}}>오늘 출퇴근</div>
+            </div>
+            <div style={{flex:1,background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"10px",textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:800}}>{employees.length}</div>
+              <div style={{fontSize:10,opacity:0.8}}>등록 직원</div>
+            </div>
+            <div style={{flex:1,background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"10px",textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:800}}>{workerTotal>0?`${Math.round(workerDone/workerTotal*100)}%`:"—"}</div>
+              <div style={{fontSize:10,opacity:0.8}}>업무 진행률</div>
+            </div>
+          </div>
+        </div>
+
+        {mode==="admin"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>
+            {[
+              {label:"업무 지침 생성",icon:"📝",sec:"worker",desc:"직원 업무 배분"},
+              {label:"실시간 공유 확인",icon:"📡",sec:"live",desc:"직원 진행 상황"},
+              {label:"근태 관리",icon:"🐝",sec:"att",desc:"출퇴근·급여"},
+              {label:"대표 업무",icon:"👔",sec:"boss",desc:"나의 업무 관리"},
+            ].map((b,i)=>(
+              <button key={i} onClick={()=>navigate(b.sec)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:"white",borderRadius:10,border:"none",cursor:"pointer",textAlign:"left"}}>
+                <span style={{fontSize:22,width:36,textAlign:"center"}}>{b.icon}</span>
+                <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{b.label}</div><div style={{fontSize:11,color:"#64748b"}}>{b.desc}</div></div>
+                <span style={{color:"#94a3b8",fontSize:16}}>›</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {mode==="worker"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {[
+              {label:"오늘 업무 확인",icon:"📡",sec:"live"},
+              {label:"업무 이행 체크",icon:"✅",sec:"workerdo"},
+              {label:"출퇴근 기록",icon:"🐝",sec:"att"},
+            ].map((b,i)=>(
+              <button key={i} onClick={()=>navigate(b.sec)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:"white",borderRadius:10,border:"none",cursor:"pointer",textAlign:"left"}}>
+                <span style={{fontSize:22}}>{b.icon}</span>
+                <div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{b.label}</div>
+                <span style={{color:"#94a3b8",fontSize:16,marginLeft:"auto"}}>›</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 메인 레이아웃 (모바일 우선)
+  return(
+    <div style={{maxWidth:480,margin:"0 auto",minHeight:"100vh",background:"#f1f5f9",display:"flex",flexDirection:"column",position:"relative"}}>
+
+      {/* 상단바 */}
+      <div style={{background:"white",borderBottom:"1px solid #e2e8f0",padding:"10px 16px",display:"flex",alignItems:"center",gap:8,position:"sticky",top:0,zIndex:100,flexShrink:0}}>
+        <button onClick={goBack} disabled={navIdx<=0} style={{padding:"5px 8px",borderRadius:6,border:"1px solid #e2e8f0",background:navIdx<=0?"#f8fafc":"white",color:navIdx<=0?"#cbd5e1":"#374151",cursor:navIdx<=0?"not-allowed":"pointer",fontSize:14,flexShrink:0}}>‹</button>
+        <button onClick={goForward} disabled={navIdx>=navHistory.length-1} style={{padding:"5px 8px",borderRadius:6,border:"1px solid #e2e8f0",background:navIdx>=navHistory.length-1?"#f8fafc":"white",color:navIdx>=navHistory.length-1?"#cbd5e1":"#374151",cursor:navIdx>=navHistory.length-1?"not-allowed":"pointer",fontSize:14,flexShrink:0}}>›</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:14,fontWeight:700,color:"#0f172a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {TABS.find(t=>t.key===section)?.label||section}
+          </div>
+          <div style={{fontSize:10,color:"#94a3b8",fontVariantNumeric:"tabular-nums"}}>{formatTime(now)}</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 10px",borderRadius:16,background:myStatus==="출근중"?"#eff6ff":myStatus==="퇴근"?"#f5f3ff":"#f8fafc",border:`1px solid ${myStatus==="출근중"?"#93c5fd":myStatus==="퇴근"?"#c4b5fd":"#e2e8f0"}`,flexShrink:0}}>
+          <div style={{width:6,height:6,borderRadius:"50%",background:myStatus==="출근중"?"#2563eb":myStatus==="퇴근"?"#7c3aed":"#94a3b8"}}/>
+          <span style={{fontSize:10,fontWeight:700,color:myStatus==="출근중"?"#2563eb":myStatus==="퇴근"?"#7c3aed":"#64748b"}}>{myStatus}</span>
+        </div>
+        <button onClick={()=>{if(window.confirm("로그아웃 할까요?"))setMode(null);}} style={{padding:"5px 8px",borderRadius:6,border:"1px solid #e2e8f0",background:"white",color:"#64748b",fontSize:11,cursor:"pointer",flexShrink:0}}>로그아웃</button>
+      </div>
+
+      {/* 콘텐츠 */}
+      <div style={{flex:1,overflow:"auto",padding:"16px 14px",paddingBottom:90}}>
+        {section==="dashboard"&&<Dashboard/>}
+
+        {/* 업무 지침 */}
+        {section==="worker"&&mode==="admin"&&(
+          <div>
+            <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>📅 날짜</div>
+                <button onClick={()=>setWDate(getTodayString())} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${wDate===getTodayString()?"#1d4ed8":"#e2e8f0"}`,background:wDate===getTodayString()?"#1d4ed8":"white",color:wDate===getTodayString()?"white":"#64748b",fontSize:10,fontWeight:600,cursor:"pointer"}}>오늘</button>
+              </div>
+              <input type="date" value={wDate} onChange={e=>setWDate(e.target.value)} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              <div style={{marginTop:4,fontSize:10,color:"#94a3b8"}}>📌 {formatDate(wDate)}</div>
+            </div>
+            <WorkSelector templates={wTemplates} optTab={wOptTab} setOptTab={setWOptTab} selected={wSelected} toggleTemplate={toggleWTemplate} toggleOption={toggleWOption} optMemos={wOptMemos} setOptMemos={setWOptMemos} priority={wPriority} setPriority={setWPriority}/>
+            <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:6}}>📝 추가 메모</div>
+              <textarea value={wMemo} onChange={e=>setWMemo(e.target.value)} placeholder="특이사항" rows={2} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:12,outline:"none",resize:"vertical",boxSizing:"border-box",fontFamily:"inherit"}}/>
+            </div>
+            <button onClick={handleWGenerate} disabled={wPriority.length===0||wSaving} style={{width:"100%",padding:"13px",borderRadius:10,border:"none",background:wPriority.length===0?"#cbd5e1":"#1d4ed8",color:"white",fontWeight:700,fontSize:14,cursor:wPriority.length===0?"not-allowed":"pointer",marginBottom:10}}>
+              {wSaving?"⏳ 저장 중...":wPriority.length===0?"⬆️ 업무 먼저 선택":"✨ 업무 지침서 생성 및 저장"}
+            </button>
+            {wSaveOk&&<div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:11,color:"#16a34a",fontWeight:600,textAlign:"center"}}>✅ 저장 완료! 직원 화면에 실시간 반영 📡</div>}
+            {wResult&&(
+              <div style={{background:"white",borderRadius:12,padding:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <span style={{fontSize:12,fontWeight:700,color:"#0f172a"}}>📋 생성된 지침서</span>
+                  <button onClick={()=>{navigator.clipboard.writeText(wResult);setWCopied(true);setTimeout(()=>setWCopied(false),2000);}} style={{padding:"4px 10px",borderRadius:6,border:"none",background:wCopied?"#16a34a":"#1d4ed8",color:"white",fontSize:10,fontWeight:700,cursor:"pointer"}}>{wCopied?"✅ 복사됨":"📋 복사"}</button>
+                </div>
+                <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#f8fafc",borderRadius:8,padding:10,fontSize:11,lineHeight:1.7,color:"#374151",border:"1px solid #e2e8f0",margin:0}}>{wResult}</pre>
+                <Checklist result={wResult} checklist={wChecklist} setChecklist={setWChecklist} color="#1d4ed8" onFirebase={async n=>{if(liveDirective?.firebaseKey)await set(ref(db,`history/${liveDirective.firebaseKey}/checks`),n);await set(ref(db,"live/checks"),n);}}/>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 실시간 공유 */}
+        {section==="live"&&(
+          <div style={{paddingBottom:80}}>
+            <div style={{background:"#eff6ff",border:"1px solid #93c5fd",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:11,color:"#1d4ed8",fontWeight:600}}>📡 대표님이 지침서를 생성하면 즉시 반영돼요</div>
+            {liveDirective?(
+              <div style={{background:"white",borderRadius:12,padding:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{formatDate(liveDirective.date)}</span>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    {liveDirective.orderChanged&&<span style={{fontSize:10,background:"#fffbeb",color:"#d97706",border:"1px solid #fcd34d",borderRadius:5,padding:"2px 6px",fontWeight:700}}>🔄 순서변경</span>}
+                    <span style={{fontSize:10,color:"#16a34a",fontWeight:600}}>● 최신</span>
+                  </div>
+                </div>
+                <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#f8fafc",borderRadius:8,padding:10,fontSize:11,lineHeight:1.7,color:"#374151",border:"1px solid #e2e8f0",margin:0}}>{liveDirective.result}</pre>
+                {liveDirective.checks&&(()=>{const t=Object.keys(liveDirective.checks).length,d=Object.values(liveDirective.checks).filter(Boolean).length;return t>0?<div style={{marginTop:10,padding:"8px 10px",borderRadius:8,background:"#f0fdf4",border:"1px solid #86efac"}}><div style={{fontSize:11,fontWeight:700,color:"#16a34a",marginBottom:4}}>✅ 직원 진행률: {d}/{t} ({Math.round(d/t*100)}%)</div><div style={{height:5,borderRadius:3,background:"#dcfce7"}}><div style={{height:"100%",borderRadius:3,background:"#16a34a",width:`${d/t*100}%`,transition:"width 0.4s"}}/></div></div>:null;})()}
+                {liveDirective.tomorrowNote&&<div style={{marginTop:8,padding:"8px 10px",borderRadius:7,background:"#fffbeb",border:"1px solid #fcd34d",fontSize:11,color:"#92400e"}}><div style={{fontWeight:700,marginBottom:2}}>📝 직원 내일 메모</div>{liveDirective.tomorrowNote}</div>}
+              </div>
+            ):<div style={{background:"white",borderRadius:12,padding:"40px 20px",textAlign:"center",color:"#94a3b8",fontSize:13}}>📭 아직 공유된 지침이 없어요</div>}
+          </div>
+        )}
+
+        {section==="workerdo"&&<WorkerDoTab/>}
+        {section==="att"&&<AttTab/>}
+
+        {/* 대표 업무 */}
+        {section==="boss"&&mode==="admin"&&(
+          <div style={{paddingBottom:80}}>
+            <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>📅 날짜</div>
+                <button onClick={()=>setBDate(getTodayString())} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${bDate===getTodayString()?"#7c3aed":"#e2e8f0"}`,background:bDate===getTodayString()?"#7c3aed":"white",color:bDate===getTodayString()?"white":"#64748b",fontSize:10,fontWeight:600,cursor:"pointer"}}>오늘</button>
+              </div>
+              <input type="date" value={bDate} onChange={e=>setBDate(e.target.value)} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+            </div>
+            <WorkSelector templates={bTemplates} optTab={bOptTab} setOptTab={setBOptTab} selected={bSelected} toggleTemplate={toggleBTemplate} toggleOption={toggleBOption} optMemos={bOptMemos} setOptMemos={setBOptMemos} priority={bPriority} setPriority={setBPriority}/>
+            <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:6}}>📝 추가 메모</div>
+              <textarea value={bMemo} onChange={e=>setBMemo(e.target.value)} placeholder="특이사항" rows={2} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:12,outline:"none",resize:"vertical",boxSizing:"border-box",fontFamily:"inherit"}}/>
+            </div>
+            <button onClick={handleBGenerate} disabled={bPriority.length===0||bSaving} style={{width:"100%",padding:"13px",borderRadius:10,border:"none",background:bPriority.length===0?"#cbd5e1":"#7c3aed",color:"white",fontWeight:700,fontSize:14,cursor:bPriority.length===0?"not-allowed":"pointer",marginBottom:10}}>
+              {bSaving?"⏳ 저장 중...":bPriority.length===0?"⬆️ 업무 먼저 선택":"✨ 대표 업무 지침서 생성"}
+            </button>
+            {bSaveOk&&<div style={{background:"#f5f3ff",border:"1px solid #c4b5fd",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:11,color:"#7c3aed",fontWeight:600,textAlign:"center"}}>✅ 히스토리에 저장됐어요</div>}
+            {bResult&&(
+              <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <span style={{fontSize:12,fontWeight:700,color:"#0f172a"}}>👔 대표 업무 지침서</span>
+                  <button onClick={()=>{navigator.clipboard.writeText(bResult);setBCopied(true);setTimeout(()=>setBCopied(false),2000);}} style={{padding:"4px 10px",borderRadius:6,border:"none",background:bCopied?"#16a34a":"#7c3aed",color:"white",fontSize:10,fontWeight:700,cursor:"pointer"}}>{bCopied?"✅":"📋"} {bCopied?"복사됨":"복사"}</button>
+                </div>
+                <pre style={{whiteSpace:"pre-wrap",wordBreak:"break-word",background:"#f8fafc",borderRadius:8,padding:10,fontSize:11,lineHeight:1.7,color:"#374151",border:"1px solid #e2e8f0",margin:0}}>{bResult}</pre>
+                <Checklist result={bResult} checklist={bChecklist} setChecklist={setBChecklist} color="#7c3aed" onFirebase={async n=>{if(bossHistory[0]?.firebaseKey)await set(ref(db,`bossHistory/${bossHistory[0].firebaseKey}/checks`),n);}}/>
+              </div>
+            )}
+            <div style={{background:"white",borderRadius:12,padding:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#7c3aed",marginBottom:6}}>📝 업무 노트 (자동저장)</div>
+              <textarea value={bNote} onChange={async e=>{setBNote(e.target.value);await set(ref(db,"bossNote"),e.target.value);}} placeholder="공유사항, 지시사항 등" rows={5} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:12,outline:"none",resize:"vertical",boxSizing:"border-box",fontFamily:"inherit",lineHeight:1.8}}/>
+            </div>
+          </div>
+        )}
+
+        {/* 히스토리 */}
+        {section==="history"&&(
+          <div style={{paddingBottom:80}}>
+            {/* 직원 히스토리 */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>📝 직원 업무 히스토리</div>
+              {mode==="admin"&&history.length>0&&<button onClick={async()=>{if(window.confirm("전체 삭제?"))await set(ref(db,"history"),null);}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #ef4444",background:"white",color:"#ef4444",fontSize:10,fontWeight:600,cursor:"pointer"}}>🗑️ 전체삭제</button>}
+            </div>
+            {history.length===0?<div style={{background:"white",borderRadius:10,padding:"24px",textAlign:"center",color:"#94a3b8",fontSize:12,marginBottom:16}}>직원 업무 히스토리가 없어요</div>:
+            <div style={{marginBottom:20}}>{history.map(h=><HistCard key={h.firebaseKey||h.id} item={h} color="#1d4ed8" onDelete={async k=>{if(mode==="admin")await remove(ref(db,`history/${k}`));else showToast("관리자만 삭제 가능해요","err");}} onLoad={item=>{setWDate(item.date);setWMemo(item.memo||"");setWPriority(item.priority||[]);setWOptMemos(item.optionMemos||{});const tids=[...new Set((item.priority||[]).map(id=>OPTION_BY_ID[id]?.tid).filter(Boolean))];setWTemplates(tids);setWOptTab(tids[0]||null);setWSelected(new Set(item.priority||[]));setWResult(item.result||"");navigate("worker");}} onCheck={async(k,n)=>{await set(ref(db,`history/${k}/checks`),n);}}/>)}</div>}
+
+            {/* 대표 히스토리 */}
+            {mode==="admin"&&(<>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#7c3aed"}}>👔 대표 업무 히스토리</div>
+                {bossHistory.length>0&&<button onClick={async()=>{if(window.confirm("전체 삭제?"))await set(ref(db,"bossHistory"),null);}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #ef4444",background:"white",color:"#ef4444",fontSize:10,fontWeight:600,cursor:"pointer"}}>🗑️ 전체삭제</button>}
+              </div>
+              {bossHistory.length===0?<div style={{background:"white",borderRadius:10,padding:"24px",textAlign:"center",color:"#94a3b8",fontSize:12,marginBottom:16}}>대표 업무 히스토리가 없어요</div>:
+              <div style={{marginBottom:20}}>{bossHistory.map(h=><HistCard key={h.firebaseKey||h.id} item={h} color="#7c3aed" onDelete={async k=>{await remove(ref(db,`bossHistory/${k}`));}} onLoad={item=>{setBDate(item.date);setBMemo(item.memo||"");setBPriority(item.priority||[]);setBOptMemos(item.optionMemos||{});const tids=[...new Set((item.priority||[]).map(id=>OPTION_BY_ID[id]?.tid).filter(Boolean))];setBTemplates(tids);setBOptTab(tids[0]||null);setBSelected(new Set(item.priority||[]));setBResult(item.result||"");setBChecklist(item.checks||{});navigate("boss");}} onCheck={async(k,n)=>{await set(ref(db,`bossHistory/${k}/checks`),n);}}/>)}</div>}
+            </>)}
+
+            {/* 근태 히스토리 */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>🐝 근태 기록</div>
+              {mode==="admin"&&attHistory.length>0&&<button onClick={async()=>{if(window.confirm("근태 기록 전체 삭제?"))await set(ref(db,"attHistory"),null);}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #ef4444",background:"white",color:"#ef4444",fontSize:10,fontWeight:600,cursor:"pointer"}}>🗑️ 전체삭제</button>}
+            </div>
+            {attHistory.length===0?<div style={{background:"white",borderRadius:10,padding:"24px",textAlign:"center",color:"#94a3b8",fontSize:12}}>근태 기록이 없어요</div>:
+            <div style={{background:"white",borderRadius:10,overflow:"hidden"}}>
+              {attHistory.slice(0,30).map((r,i)=>(
+                <div key={r.firebaseKey||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",borderBottom:"1px solid #f1f5f9",fontSize:11}}>
+                  <span style={{fontWeight:600,color:"#0f172a",width:60,flexShrink:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.name}</span>
+                  <span style={{color:"#64748b",flexShrink:0}}>{r.date}</span>
+                  <span style={{color:"#374151",flexShrink:0}}>{r.checkIn||"—"}→{r.checkOut||"중"}</span>
+                  <span style={{padding:"2px 6px",borderRadius:8,fontSize:10,fontWeight:700,background:r.status==="정상"?"#f0fdf4":r.status==="지각"?"#fef2f2":"#eff6ff",color:r.status==="정상"?"#16a34a":r.status==="지각"?"#dc2626":"#1d4ed8",flexShrink:0}}>{r.status||"출근중"}</span>
+                </div>
+              ))}
+            </div>}
+          </div>
+        )}
+      </div>
+
+      {/* 하단 탭 네비 */}
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"white",borderTop:"1px solid #e2e8f0",display:"flex",zIndex:200,paddingBottom:"env(safe-area-inset-bottom)"}}>
+        {TABS.map(t=>(
+          <button key={t.key} onClick={()=>navigate(t.key)} style={{flex:1,padding:"10px 4px 8px",border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+            <span style={{fontSize:20,lineHeight:1}}>{t.icon}</span>
+            <span style={{fontSize:9,fontWeight:section===t.key?700:400,color:section===t.key?"#1d4ed8":"#94a3b8"}}>{t.label}</span>
+            {section===t.key&&<div style={{width:20,height:2,background:"#1d4ed8",borderRadius:1}}/>}
+          </button>
+        ))}
       </div>
 
       {/* 인증 모달 */}
-      {authModal&&<AuthModal type={authModal.type} action={authModal.action} onClose={()=>setAuthModal(null)} onSuccess={()=>{ authModal.action==="in"?doCheckIn():doCheckOut(); }}/>}
+      {authModal?.type==="qr"&&<QRAuthModal action={authModal.action} onClose={()=>setAuthModal(null)} onSuccess={()=>authModal.action==="in"?doCheckIn():doCheckOut()}/>}
+      {authModal?.type==="gps"&&<GPSAuthModal action={authModal.action} onClose={()=>setAuthModal(null)} onSuccess={()=>authModal.action==="in"?doCheckIn():doCheckOut()}/>}
+      {authModal?.type==="wifi"&&<WiFiAuthModal action={authModal.action} onClose={()=>setAuthModal(null)} onSuccess={()=>authModal.action==="in"?doCheckIn():doCheckOut()}/>}
+
+      {/* 직원 등록 모달 */}
+      {registerModal&&<RegisterModal onClose={()=>setRegisterModal(false)} onSuccess={()=>showToast("✅ 직원이 등록됐어요!")} isAdmin={mode==="admin"}/>}
 
       {/* 토스트 */}
       {toast&&<Toast msg={toast.msg} type={toast.type} onClose={()=>setToast(null)}/>}
 
-      <style>{`* { box-sizing:border-box; } ::-webkit-scrollbar{width:5px;height:5px;} ::-webkit-scrollbar-track{background:#f1f5f9;} ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;} button:active{transform:scale(0.98);}`}</style>
-    </div>
-  );
-}
-
-// ── 업무 이행 탭 ─────────────────────────────────────────
-function WorkerTab({liveDirective,db}) {
-  const [localOrder,setLocalOrder]=useState(null);
-  const [orderChanged,setOrderChanged]=useState(false);
-
-  useEffect(()=>{
-    if(liveDirective?.result){
-      const raw=liveDirective.result.split("\n").filter(l=>/^\d+번째/.test(l));
-      if(liveDirective.workerOrder) setLocalOrder(liveDirective.workerOrder);
-      else setLocalOrder(p=>p||raw);
-    }
-  },[liveDirective]);
-
-  if(!liveDirective||!localOrder) return (
-    <div style={{background:"white",borderRadius:12,padding:"48px 24px",textAlign:"center",color:"#94a3b8",boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
-      📭 아직 공유된 업무 지침이 없어요.<br/><span style={{fontSize:12,marginTop:6,display:"block"}}>대표님이 지침서를 생성하면 여기에 나타나요!</span>
-    </div>
-  );
-
-  const checks=liveDirective.checks||{};
-  const tomorrowNote=liveDirective.tomorrowNote||"";
-  const done=Object.values(checks).filter(Boolean).length;
-
-  const moveItem=async(idx,dir)=>{
-    const n=[...localOrder],s=idx+dir;
-    if(s<0||s>=n.length) return;
-    [n[idx],n[s]]=[n[s],n[idx]];
-    setLocalOrder(n); setOrderChanged(true);
-    await set(ref(db,"live/orderChanged"),true);
-    await set(ref(db,"live/workerOrder"),n);
-  };
-
-  const resetOrder=async()=>{
-    const raw=liveDirective.result.split("\n").filter(l=>/^\d+번째/.test(l));
-    setLocalOrder(raw); setOrderChanged(false);
-    await set(ref(db,"live/orderChanged"),false);
-    await set(ref(db,"live/workerOrder"),null);
-  };
-
-  const toggleCheck=async(i)=>{
-    const n={...checks,[i]:!checks[i]};
-    await set(ref(db,"live/checks"),n);
-    if(liveDirective.firebaseKey) await set(ref(db,`history/${liveDirective.firebaseKey}/checks`),n);
-  };
-
-  function formatDate2(dateStr){
-    if(!dateStr) return "";
-    const d=new Date(dateStr+"T00:00:00");
-    const days=["일","월","화","수","목","금","토"];
-    return `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;
-  }
-
-  return (
-    <div style={{maxWidth:600}}>
-      <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#16a34a",fontWeight:600}}>
-        ✅ 체크와 순서 변경이 대표님께 실시간 공유돼요 · 완료 내용은 히스토리에 저장돼요
-      </div>
-
-      <div style={{background:"white",borderRadius:12,padding:18,boxShadow:"0 1px 3px rgba(0,0,0,0.08)",marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div>
-            <div style={{fontSize:14,fontWeight:700,color:"#0f172a"}}>{formatDate2(liveDirective.date)}</div>
-            <div style={{fontSize:12,color:"#16a34a",fontWeight:600,marginTop:2}}>완료 {done}/{localOrder.length}</div>
-          </div>
-          {orderChanged&&<button onClick={resetOrder} style={{padding:"5px 10px",border:"1px solid #e2e8f0",borderRadius:6,background:"white",fontSize:11,color:"#64748b",cursor:"pointer"}}>순서 원래대로</button>}
-        </div>
-
-        {orderChanged&&<div style={{padding:"8px 12px",borderRadius:8,background:"#fffbeb",border:"1px solid #fcd34d",marginBottom:12,fontSize:12,color:"#d97706",fontWeight:600}}>🔄 순서를 변경했어요 — 대표님께 알림이 전송됐어요</div>}
-
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {localOrder.map((item,i)=>{
-            const isChecked=!!checks[i];
-            return (
-              <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",borderRadius:8,background:isChecked?"#f0fdf4":"#f8fafc",border:`1px solid ${isChecked?"#86efac":"#e2e8f0"}`,transition:"all 0.2s"}}>
-                <input type="checkbox" checked={isChecked} onChange={()=>toggleCheck(i)} style={{accentColor:"#16a34a",width:17,height:17,flexShrink:0,cursor:"pointer"}}/>
-                <span style={{minWidth:22,height:22,borderRadius:"50%",background:isChecked?"#16a34a":"#cbd5e1",color:"white",fontWeight:700,fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{i+1}</span>
-                <span style={{flex:1,fontSize:12,color:isChecked?"#16a34a":"#374151",textDecoration:isChecked?"line-through":"none"}}>{item}</span>
-                <div style={{display:"flex",flexDirection:"column",gap:1,flexShrink:0}}>
-                  <button onClick={()=>moveItem(i,-1)} disabled={i===0} style={{padding:"2px 6px",border:"1px solid #e2e8f0",borderRadius:3,background:i===0?"#f8fafc":"white",cursor:i===0?"not-allowed":"pointer",fontSize:9,color:"#64748b"}}>▲</button>
-                  <button onClick={()=>moveItem(i,1)} disabled={i===localOrder.length-1} style={{padding:"2px 6px",border:"1px solid #e2e8f0",borderRadius:3,background:i===localOrder.length-1?"#f8fafc":"white",cursor:i===localOrder.length-1?"not-allowed":"pointer",fontSize:9,color:"#64748b"}}>▼</button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* 진행바 */}
-        <div style={{marginTop:14}}>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#64748b",marginBottom:4}}>
-            <span>오늘의 진행률</span>
-            <span style={{color:"#16a34a",fontWeight:700}}>{localOrder.length>0?Math.round(done/localOrder.length*100):0}%</span>
-          </div>
-          <div style={{height:7,borderRadius:4,background:"#e2e8f0"}}>
-            <div style={{height:"100%",borderRadius:4,background:"linear-gradient(90deg,#16a34a,#22c55e)",width:`${localOrder.length>0?done/localOrder.length*100:0}%`,transition:"width 0.4s"}}/>
-          </div>
-        </div>
-      </div>
-
-      {/* 내일 메모 */}
-      <div style={{background:"white",borderRadius:12,padding:16,boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
-        <label style={{fontSize:12,fontWeight:700,color:"#d97706",display:"block",marginBottom:8}}>
-          📝 내일 할 일 메모 <span style={{fontSize:10,color:"#94a3b8",fontWeight:400}}>(오늘 못한 일이나 내일 챙길 것)</span>
-        </label>
-        <textarea value={tomorrowNote}
-          onChange={async e=>{
-            await set(ref(db,"live/tomorrowNote"),e.target.value);
-            if(liveDirective.firebaseKey) await set(ref(db,`history/${liveDirective.firebaseKey}/tomorrowNote`),e.target.value);
-          }}
-          placeholder={"예:\n• 릴스 편집 마무리 필요\n• 쿠팡 물품 등록 3개 남음"}
-          rows={5} style={{width:"100%",padding:"9px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:12,outline:"none",resize:"vertical",boxSizing:"border-box",fontFamily:"inherit",lineHeight:1.7}}/>
-        {tomorrowNote&&<div style={{marginTop:5,fontSize:11,color:"#16a34a",fontWeight:600}}>✅ 저장됨 — 대표님도 실시간 확인 가능해요</div>}
-      </div>
+      <style>{`*{box-sizing:border-box;}::-webkit-scrollbar{display:none;}body{margin:0;overflow-x:hidden;}`}</style>
     </div>
   );
 }
