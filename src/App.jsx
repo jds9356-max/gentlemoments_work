@@ -785,7 +785,7 @@ export default function App(){
             )}
             <div style={{...cardStyle}}>
               <div style={{fontSize:11,fontWeight:700,color:"#7c3aed",marginBottom:6}}>📝 업무 노트 (자동저장)</div>
-              <textarea value={bNote} onChange={async e=>{setBNote(e.target.value);await set(ref(db,"bossNote"),e.target.value);}} placeholder="공유사항, 지시사항 등" rows={5} style={{...inputStyle,resize:"vertical",lineHeight:1.8}}/>
+              <textarea value={bossNote} onChange={async e=>{setBossNote(e.target.value);await set(ref(db,"bossNote"),e.target.value);}} placeholder="공유사항, 지시사항 등" rows={5} style={{...inputStyle,resize:"vertical",lineHeight:1.8}}/>
             </div>
           </div>
         )}
