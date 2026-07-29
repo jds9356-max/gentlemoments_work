@@ -55,6 +55,87 @@ function generateDirectiveText(date,priority,memo,optionMemos){
   return`📅 ${formatDate(date)} 업무 지침서\n\n안녕하세요! 오늘도 잘 부탁드려요 😊\n\n━━━━━━━━━━━━━━━━━━\n📋 오늘의 업무 목록\n━━━━━━━━━━━━━━━━━━\n${taskLines}\n${ms}\n\n수고하세요! 오늘도 화이팅입니다 💪`;
 }
 
+// ── CSV/엑셀 내보내기 ─────────────────────────────────────
+function exportToCSV(filename, rows, headers){
+  const BOM="\uFEFF";
+  const csvContent=BOM+[headers,...rows].map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob=new Blob([csvContent],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);
+}
+
+// ── WorkSelector (외부 컴포넌트로 분리 — 내부함수 금지) ──
+function WorkSelector({templates,optTab,setOptTab,selected,toggleTemplate,toggleOption,optMemos,setOptMemos,priority,setPriority}){
+  const moveP=(idx,dir)=>{const n=[...priority],s=idx+dir;if(s<0||s>=n.length)return;[n[idx],n[s]]=[n[s],n[idx]];setPriority(n);};
+  return(
+    <>
+      <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:10}}>업무 템플릿 선택</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {Object.entries(TEMPLATE_META).map(([tidStr,meta])=>{
+            const tid=Number(tidStr),isOn=templates.includes(tid);
+            return<button key={tid} onClick={()=>toggleTemplate(tid)} style={{padding:"9px 10px",borderRadius:8,border:`1.5px solid ${isOn?meta.color:"#e2e8f0"}`,background:isOn?meta.bg:"white",color:isOn?meta.color:"#64748b",fontWeight:isOn?700:400,cursor:"pointer",fontSize:11,textAlign:"left",display:"flex",alignItems:"center",gap:5,width:"100%",boxSizing:"border-box"}}>
+              <span style={{width:13,height:13,borderRadius:3,border:`2px solid ${isOn?meta.color:"#cbd5e1"}`,background:isOn?meta.color:"white",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"white",fontWeight:700,flexShrink:0}}>{isOn?"✓":""}</span>
+              <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{meta.label}</span>
+            </button>;
+          })}
+        </div>
+      </div>
+      {templates.length>0&&(
+        <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+            {templates.map(tid=>{const meta=TEMPLATE_META[tid];const cnt=OPTION_MAP[tid].filter(o=>selected.has(o.id)).length;const isA=optTab===tid;return<button key={tid} onClick={()=>setOptTab(tid)} style={{padding:"5px 10px",borderRadius:16,border:`1.5px solid ${isA?meta.color:"#e2e8f0"}`,background:isA?meta.color:"white",color:isA?"white":meta.color,fontWeight:isA?700:500,cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",gap:4}}>{meta.label}{cnt>0&&<span style={{background:isA?"rgba(255,255,255,0.3)":meta.color,color:"white",borderRadius:8,fontSize:9,padding:"0 4px",fontWeight:700}}>{cnt}</span>}</button>;})}
+          </div>
+          {optTab&&OPTION_MAP[optTab]&&(()=>{
+            const meta=TEMPLATE_META[optTab];const opts=OPTION_MAP[optTab];
+            return(
+              <div style={{borderTop:`2px solid ${meta.color}`,paddingTop:10}}>
+                <div style={{fontSize:11,fontWeight:700,color:meta.color,marginBottom:8}}>{meta.label} 세부 선택</div>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {opts.map(opt=>(
+                    <div key={opt.id}>
+                      <button onClick={()=>toggleOption(opt.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:7,border:`1.5px solid ${selected.has(opt.id)?meta.color:"#e2e8f0"}`,background:selected.has(opt.id)?meta.bg:"white",color:selected.has(opt.id)?meta.color:"#64748b",fontWeight:selected.has(opt.id)?700:400,cursor:"pointer",fontSize:12,textAlign:"left",boxSizing:"border-box"}}>
+                        <span style={{width:14,height:14,borderRadius:3,border:`2px solid ${selected.has(opt.id)?meta.color:"#cbd5e1"}`,background:selected.has(opt.id)?meta.color:"white",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"white",flexShrink:0}}>{selected.has(opt.id)?"✓":""}</span>
+                        {opt.label}
+                      </button>
+                      {selected.has(opt.id)&&(
+                        <input
+                          key={`memo-${opt.id}`}
+                          type="text"
+                          value={optMemos[opt.id]||""}
+                          onChange={e=>{const v=e.target.value;setOptMemos(p=>({...p,[opt.id]:v}));}}
+                          placeholder={`${opt.label} 메모`}
+                          style={{marginTop:3,width:"100%",padding:"6px 10px",border:"1px solid #e2e8f0",borderRadius:6,fontSize:11,outline:"none",boxSizing:"border-box",background:"#f8fafc",fontFamily:"inherit"}}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+      {priority.length>=2&&(
+        <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:8}}>🔢 업무 순서 <span style={{color:"#94a3b8",fontWeight:400,fontSize:10}}>(▲▼)</span></div>
+          {priority.map((id,idx)=>{const opt=OPTION_BY_ID[id],meta=TEMPLATE_META[opt.tid];return(
+            <div key={id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:7,border:`1px solid ${idx===0?meta.color:"#e2e8f0"}`,background:idx===0?`${meta.color}10`:"#f8fafc",marginBottom:5}}>
+              <span style={{minWidth:20,height:20,borderRadius:"50%",background:idx===0?meta.color:"#cbd5e1",color:"white",fontWeight:700,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{idx+1}</span>
+              <span style={{fontSize:10,fontWeight:700,color:"white",background:meta.color,borderRadius:3,padding:"1px 5px",flexShrink:0}}>{opt.tid===1?"SNS":opt.tid===2?"쇼핑":opt.tid===3?"릴스":opt.tid===4?"사무":opt.tid===5?"사진":"기타"}</span>
+              <span style={{flex:1,fontSize:11,color:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{opt.label}</span>
+              <div style={{display:"flex",gap:2,flexShrink:0}}>
+                <button onClick={()=>moveP(idx,-1)} disabled={idx===0} style={{padding:"2px 5px",border:"1px solid #e2e8f0",borderRadius:3,background:"white",cursor:idx===0?"not-allowed":"pointer",fontSize:9,color:"#64748b"}}>▲</button>
+                <button onClick={()=>moveP(idx,1)} disabled={idx===priority.length-1} style={{padding:"2px 5px",border:"1px solid #e2e8f0",borderRadius:3,background:"white",cursor:idx===priority.length-1?"not-allowed":"pointer",fontSize:9,color:"#64748b"}}>▼</button>
+              </div>
+            </div>
+          );})}
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── 공용 컴포넌트 ─────────────────────────────────────────
 function Toast({msg,type,onClose}){
   useEffect(()=>{const t=setTimeout(onClose,3000);return()=>clearTimeout(t);},[]);
@@ -626,47 +707,7 @@ export default function App(){
 
   // ── 내부 컴포넌트 ──
 
-  // 업무 선택 패널
-  function WorkSelector({templates,optTab,setOptTab,selected,toggleTemplate,toggleOption,optMemos,setOptMemos,priority,setPriority}){
-    const moveP=(idx,dir)=>{const n=[...priority],s=idx+dir;if(s<0||s>=n.length)return;[n[idx],n[s]]=[n[s],n[idx]];setPriority(n);};
-    return(
-      <>
-        <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:10}}>업무 템플릿 선택</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {Object.entries(TEMPLATE_META).map(([tidStr,meta])=>{
-              const tid=Number(tidStr),isOn=templates.includes(tid);
-              return<button key={tid} onClick={()=>toggleTemplate(tid)} style={{padding:"9px 10px",borderRadius:8,border:`1.5px solid ${isOn?meta.color:"#e2e8f0"}`,background:isOn?meta.bg:"white",color:isOn?meta.color:"#64748b",fontWeight:isOn?700:400,cursor:"pointer",fontSize:11,textAlign:"left",display:"flex",alignItems:"center",gap:5}}><span style={{width:13,height:13,borderRadius:3,border:`2px solid ${isOn?meta.color:"#cbd5e1"}`,background:isOn?meta.color:"white",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"white",fontWeight:700,flexShrink:0}}>{isOn?"✓":""}</span>{meta.label}</button>;
-            })}
-          </div>
-        </div>
-        {templates.length>0&&(
-          <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
-              {templates.map(tid=>{const meta=TEMPLATE_META[tid];const cnt=OPTION_MAP[tid].filter(o=>selected.has(o.id)).length;const isA=optTab===tid;return<button key={tid} onClick={()=>setOptTab(tid)} style={{padding:"5px 10px",borderRadius:16,border:`1.5px solid ${isA?meta.color:"#e2e8f0"}`,background:isA?meta.color:"white",color:isA?"white":meta.color,fontWeight:isA?700:500,cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",gap:4}}>{meta.label}{cnt>0&&<span style={{background:isA?"rgba(255,255,255,0.3)":meta.color,color:"white",borderRadius:8,fontSize:9,padding:"0 4px",fontWeight:700}}>{cnt}</span>}</button>;})}
-            </div>
-            {optTab&&OPTION_MAP[optTab]&&(()=>{const meta=TEMPLATE_META[optTab];const opts=OPTION_MAP[optTab];return<div style={{borderTop:`2px solid ${meta.color}`,paddingTop:10}}><div style={{fontSize:11,fontWeight:700,color:meta.color,marginBottom:8}}>{meta.label} 세부 선택</div><div style={{display:"flex",flexDirection:"column",gap:5}}>{opts.map(opt=><div key={opt.id}><button onClick={()=>toggleOption(opt.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:7,border:`1.5px solid ${selected.has(opt.id)?meta.color:"#e2e8f0"}`,background:selected.has(opt.id)?meta.bg:"white",color:selected.has(opt.id)?meta.color:"#64748b",fontWeight:selected.has(opt.id)?700:400,cursor:"pointer",fontSize:12,textAlign:"left"}}><span style={{width:14,height:14,borderRadius:3,border:`2px solid ${selected.has(opt.id)?meta.color:"#cbd5e1"}`,background:selected.has(opt.id)?meta.color:"white",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"white",flexShrink:0}}>{selected.has(opt.id)?"✓":""}</span>{opt.label}</button>{selected.has(opt.id)&&<input value={optMemos[opt.id]||""} onChange={e=>setOptMemos(p=>({...p,[opt.id]:e.target.value}))} placeholder={`${opt.label} 메모`} style={{marginTop:3,width:"100%",padding:"6px 10px",border:"1px solid #e2e8f0",borderRadius:6,fontSize:11,outline:"none",boxSizing:"border-box",background:"#f8fafc"}}/>}</div>)}</div></div>;})()}
-          </div>
-        )}
-        {priority.length>=2&&(
-          <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:8}}>🔢 업무 순서 <span style={{color:"#94a3b8",fontWeight:400,fontSize:10}}>(▲▼ 또는 드래그)</span></div>
-            {priority.map((id,idx)=>{const opt=OPTION_BY_ID[id],meta=TEMPLATE_META[opt.tid];return(
-              <div key={id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:7,border:`1px solid ${idx===0?meta.color:"#e2e8f0"}`,background:idx===0?`${meta.color}10`:"#f8fafc",marginBottom:5}}>
-                <span style={{minWidth:20,height:20,borderRadius:"50%",background:idx===0?meta.color:"#cbd5e1",color:"white",fontWeight:700,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{idx+1}</span>
-                <span style={{fontSize:10,fontWeight:700,color:"white",background:meta.color,borderRadius:3,padding:"1px 5px",flexShrink:0,maxWidth:60,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{opt.tid===1?"SNS":opt.tid===2?"쇼핑":opt.tid===3?"릴스":opt.tid===4?"사무":opt.tid===5?"사진":"기타"}</span>
-                <span style={{flex:1,fontSize:11,color:"#374151",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{opt.label}</span>
-                <div style={{display:"flex",gap:2,flexShrink:0}}>
-                  <button onClick={()=>moveP(idx,-1)} disabled={idx===0} style={{padding:"2px 5px",border:"1px solid #e2e8f0",borderRadius:3,background:"white",cursor:idx===0?"not-allowed":"pointer",fontSize:9,color:"#64748b"}}>▲</button>
-                  <button onClick={()=>moveP(idx,1)} disabled={idx===priority.length-1} style={{padding:"2px 5px",border:"1px solid #e2e8f0",borderRadius:3,background:"white",cursor:idx===priority.length-1?"not-allowed":"pointer",fontSize:9,color:"#64748b"}}>▼</button>
-                </div>
-              </div>
-            );})}
-          </div>
-        )}
-      </>
-    );
-  }
+  // WorkSelector는 파일 상단의 외부 컴포넌트를 사용
 
   // 체크리스트
   function Checklist({result,checklist,setChecklist,onFirebase,color="#3b82f6"}){
@@ -1181,7 +1222,7 @@ export default function App(){
                 <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>📅 날짜</div>
                 <button onClick={()=>setWDate(getTodayString())} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${wDate===getTodayString()?"#1d4ed8":"#e2e8f0"}`,background:wDate===getTodayString()?"#1d4ed8":"white",color:wDate===getTodayString()?"white":"#64748b",fontSize:10,fontWeight:600,cursor:"pointer"}}>오늘</button>
               </div>
-              <input type="date" value={wDate} onChange={e=>setWDate(e.target.value)} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              <input type="date" value={wDate} onChange={e=>setWDate(e.target.value)} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box",overflow:"hidden"}}/>
               <div style={{marginTop:4,fontSize:10,color:"#94a3b8"}}>📌 {formatDate(wDate)}</div>
             </div>
             <WorkSelector templates={wTemplates} optTab={wOptTab} setOptTab={setWOptTab} selected={wSelected} toggleTemplate={toggleWTemplate} toggleOption={toggleWOption} optMemos={wOptMemos} setOptMemos={setWOptMemos} priority={wPriority} setPriority={setWPriority}/>
@@ -1238,7 +1279,7 @@ export default function App(){
                 <div style={{fontSize:12,fontWeight:700,color:"#374151"}}>📅 날짜</div>
                 <button onClick={()=>setBDate(getTodayString())} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${bDate===getTodayString()?"#7c3aed":"#e2e8f0"}`,background:bDate===getTodayString()?"#7c3aed":"white",color:bDate===getTodayString()?"white":"#64748b",fontSize:10,fontWeight:600,cursor:"pointer"}}>오늘</button>
               </div>
-              <input type="date" value={bDate} onChange={e=>setBDate(e.target.value)} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              <input type="date" value={bDate} onChange={e=>setBDate(e.target.value)} style={{width:"100%",padding:"8px 10px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,outline:"none",boxSizing:"border-box",overflow:"hidden"}}/>
             </div>
             <WorkSelector templates={bTemplates} optTab={bOptTab} setOptTab={setBOptTab} selected={bSelected} toggleTemplate={toggleBTemplate} toggleOption={toggleBOption} optMemos={bOptMemos} setOptMemos={setBOptMemos} priority={bPriority} setPriority={setBPriority}/>
             <div style={{background:"white",borderRadius:12,padding:14,marginBottom:12}}>
@@ -1269,6 +1310,47 @@ export default function App(){
         {/* 히스토리 */}
         {section==="history"&&(
           <div style={{paddingBottom:80}}>
+            {/* 엑셀 내보내기 버튼 */}
+            {mode==="admin"&&(
+              <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+                <button onClick={()=>{
+                  const headers=["날짜","업무목록","메모","완료율","내일메모"];
+                  const rows=history.map(h=>{
+                    const items=(h.priority||[]).map(id=>OPTION_BY_ID[id]?.label).filter(Boolean).join(" / ");
+                    const checks=h.checks||{};
+                    const done=Object.values(checks).filter(Boolean).length;
+                    const total=Object.keys(checks).length;
+                    return[h.date,items,h.memo||"",total>0?`${done}/${total}`:"",h.tomorrowNote||""];
+                  });
+                  exportToCSV(`직원업무히스토리_${getTodayString()}.csv`,rows,headers);
+                  showToast("📊 직원 히스토리 내보내기 완료!");
+                }} style={{padding:"8px 14px",borderRadius:8,border:"1px solid #1d4ed8",background:"#eff6ff",color:"#1d4ed8",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                  📊 직원업무 내보내기
+                </button>
+                <button onClick={()=>{
+                  const headers=["날짜","업무목록","메모","완료율"];
+                  const rows=bossHistory.map(h=>{
+                    const items=(h.priority||[]).map(id=>OPTION_BY_ID[id]?.label).filter(Boolean).join(" / ");
+                    const checks=h.checks||{};
+                    const done=Object.values(checks).filter(Boolean).length;
+                    const total=Object.keys(checks).length;
+                    return[h.date,items,h.memo||"",total>0?`${done}/${total}`:""];
+                  });
+                  exportToCSV(`대표업무히스토리_${getTodayString()}.csv`,rows,headers);
+                  showToast("📊 대표 히스토리 내보내기 완료!");
+                }} style={{padding:"8px 14px",borderRadius:8,border:"1px solid #7c3aed",background:"#f5f3ff",color:"#7c3aed",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                  📊 대표업무 내보내기
+                </button>
+                <button onClick={()=>{
+                  const headers=["이름","날짜","출근","퇴근","상태","모드"];
+                  const rows=attHistory.map(r=>[r.name,r.date,r.checkIn||"",r.checkOut||"",r.status||"출근중",r.mode||""]);
+                  exportToCSV(`근태기록_${getTodayString()}.csv`,rows,headers);
+                  showToast("📊 근태 기록 내보내기 완료!");
+                }} style={{padding:"8px 14px",borderRadius:8,border:"1px solid #10b981",background:"#f0fdf4",color:"#10b981",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                  📊 근태기록 내보내기
+                </button>
+              </div>
+            )}
             {/* 직원 히스토리 */}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <div style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>📝 직원 업무 히스토리</div>
